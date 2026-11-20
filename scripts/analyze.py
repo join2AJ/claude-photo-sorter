@@ -19,7 +19,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 from common import DATA, DB, load
 
-VERSION = 2  # 2: plain_bg (passport-size photos)
+VERSION = 3  # 2: plain_bg (passport-size photos), 3: colors (sky, sunset, night, greenery)
 FACES_DIR = os.path.join(DATA, "faces")
 
 SCHEMA = """
@@ -50,7 +50,7 @@ def connect():
     db = sqlite3.connect(DB, timeout=30)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
-    for table, col, kind in (("people", "family", "INT DEFAULT 0"), ("people", "aliases", "TEXT"), ("files", "plain_bg", "REAL")):
+    for table, col, kind in (("people", "family", "INT DEFAULT 0"), ("people", "aliases", "TEXT"), ("files", "plain_bg", "REAL"), ("files", "colors", "TEXT")):
         if col not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")  # older libraries: add the new column
     return db
@@ -250,6 +250,10 @@ def work(rec):
                 row["plain_bg"] = round(float(band.std()), 2)
             row.update({k: v for k, v in meta.items() if not k.startswith("_") and v and not row.get(k)})
             row["is_screenshot"] = int(shot)
+            if not shot:
+                from PIL import Image
+                import tags as tagmod
+                row["colors"] = ",".join(tagmod.color_tags(Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))))
             row["tags"] = ", ".join(names)
             if shot:
                 row["content"] = textinfo.screen_type(text)
@@ -278,6 +282,10 @@ def work(rec):
                         fc["img_w"], fc["img_h"], fc["frame_s"] = img.shape[1], img.shape[0], round(t, 1)
                         best.append(fc)
                 faces = best
+                if frames:
+                    from PIL import Image
+                    import tags as tagmod
+                    row["colors"] = ",".join(tagmod.color_tags(Image.open(frames[len(frames) // 2][1])))
                 row["tags"] = ", ".join(k for k, _ in sorted(tagcount.items(), key=lambda kv: -kv[1])[:5])
         else:
             text = doc_text(rec["path"], rec["ext"])
@@ -341,7 +349,7 @@ class People:
 def save_result(db, people, row, faces):
     cols = ["sha256", "version", "name", "ext", "kind", "bytes", "width", "height", "duration", "taken", "camera", "lens",
             "lat", "lon", "is_screenshot", "tags", "text", "company", "sector", "content", "amount", "currency",
-            "direction", "txn_ids", "face_count", "error", "analysed_at", "plain_bg"]
+            "direction", "txn_ids", "face_count", "error", "analysed_at", "plain_bg", "colors"]
     row = dict(row, version=VERSION, analysed_at=now())
     db.execute(f"INSERT OR REPLACE INTO files ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                [row.get(c) for c in cols])

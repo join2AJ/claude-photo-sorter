@@ -5,7 +5,7 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(__file__))
 from common import CATEGORIES, DATA, DB, load
-import vault
+import tags, vault
 from datetime import datetime
 
 NO_FACE = "un"
@@ -77,7 +77,7 @@ def library():
             "company": i.get("company") or "", "sector": i.get("sector") or "", "content": i.get("content") or "",
             "amount": i.get("amount"), "currency": i.get("currency") or "", "direction": i.get("direction") or "",
             "txn_ids": i.get("txn_ids") or "", "error": r.get("error") or i.get("error") or "",
-            "plain_bg": i.get("plain_bg"),
+            "plain_bg": i.get("plain_bg"), "colors": i.get("colors") or "",
             "modified": i.get("taken") or (datetime.fromtimestamp(r["mtime"]).strftime("%Y-%m-%d %H:%M") if r.get("mtime") else None),
             "analysed": bool(i), "face_ids": [f["face_id"] for f in fs],
             "people_ids": sorted({f["person_id"] for f in fs if f["person_id"]}),
@@ -124,6 +124,8 @@ def library():
         f["file"] = file_by_sha.get(f["sha256"], [{}])[0].get("name", "")
         f["person"] = people[f["person_id"]]["display"] if f["person_id"] in people else ""
     face_by_id = {f["face_id"]: f for f in faces}
+    for f in files:
+        f["labels"] = tags.make_labels(f, [face_by_id[i] for i in f["face_ids"] if i in face_by_id], people)
     vmap = vault.assign(files, face_by_id, people, overrides)
     for f in files:
         f["vault"] = vmap.get(f["id"])

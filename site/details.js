@@ -54,7 +54,7 @@ $("theme").onclick = () => setTheme(document.documentElement.dataset.theme === "
 let D = { files: [], faces: [], people: [] }, byFile = {}, byPerson = {}, byFace = {};
 const ui = { tab: "all", q: "", sort: null, desc: false, shown: 200, kind: "", minPhotos: 1, merge: null, who: [], mood: "" };
 try { Object.assign(ui, JSON.parse(sessionStorage.getItem("details-ui") || "{}"), { merge: null, shown: 200 }); } catch (e) {}
-const remember = () => { try { sessionStorage.setItem("details-ui", JSON.stringify({ tab: ui.tab, minPhotos: ui.minPhotos, who: ui.who, mood: ui.mood })); } catch (e) {} };
+const remember = () => { try { sessionStorage.setItem("details-ui", JSON.stringify({ tab: ui.tab, minPhotos: ui.minPhotos, who: ui.who, mood: ui.mood, tag: ui.tag, tl: ui.tl })); } catch (e) {} };
 
 /* ---------- moods: estimated emotions per face, summed up per photo ---------- */
 const EMOJI = { happy: "😊", neutral: "😐", surprised: "😮", sad: "😢", angry: "😠", disgusted: "🤢", scared: "😨", contempt: "😒" };
@@ -104,7 +104,7 @@ function kpis() {
 const TABS = [
   ["all", "Everything", () => D.files.length], ["people", "People", () => D.people.length], ["faces", "Faces", () => D.faces.length],
   ["shots", "Screenshots", () => D.files.filter(f => f.screenshot).length], ["money", "Money", () => D.files.filter(f => f.amount && !f.duplicate_of).length],
-  ["family", "Family", () => D.people.filter(p => p.family).length],
+  ["family", "Family", () => D.people.filter(p => p.family).length], ["timeline", "Timeline", () => D.people.filter(p => p.name).length],
   ["docs", "Documents", () => D.files.filter(f => f.kind === "doc").length], ["videos", "Videos", () => D.files.filter(f => f.kind === "video").length],
 ];
 function tabs() {
@@ -157,6 +157,8 @@ const T = {  // reusable columns
   people: { h: "People", k: "people", r: f => f.people === "un" ? el("span", { class: "tag un" }, "un") : f.people_ids.map(i => el("span", { class: "tag" }, personName(i))) },
   pids: { h: "Person IDs", k: "pids", v: f => f.people_ids.join(","), r: f => f.people_ids.length ? f.people_ids.map(pid).join(", ") : "un" },
   fids: { h: "Face IDs", k: "fids", v: f => f.face_ids.length, r: f => f.face_ids.map(fid).join(", ") },
+  labels: { h: "Tags", k: "labels", v: f => (f.labels || []).join(" "), cls: "tags-cell", r: f => (f.labels || []).slice(0, 8).map(t =>
+    el("button", { class: "tag tagbtn" + (ui.tag === t ? " on" : ""), onclick: e => { e.stopPropagation(); ui.tag = ui.tag === t ? "" : t; remember(); render(); } }, t)) },
   mood: { h: "Mood (est.)", k: "mood", v: f => mood(f), r: moodTag },
   feels: { h: "Who feels what (est.)", k: "feels", v: whoFeels, r: whoFeels },
   ests: { h: "Age · gender · emotion (est.)", r: f => f.face_ids.map(i => byFace[i]).filter(x => x && x.age).map(x => `${x.age} ${x.gender || ""} ${x.emotion || ""}`).join(" | ") },
@@ -177,7 +179,7 @@ const T = {  // reusable columns
 let renderBody = () => {};
 function render() {
   $("view").replaceChildren();
-  ({ all: viewAll, family: viewFamily, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
+  ({ all: viewAll, family: viewFamily, timeline: viewTimeline, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
 }
 function simple(filter, cols, extra = [], note = null) {
   toolbar(extra, note);
@@ -185,7 +187,7 @@ function simple(filter, cols, extra = [], note = null) {
   renderBody();
 }
 /* filters shared by Everything and Videos: people in the photo (all of them) and mood */
-const filterPeopleMood = f => ui.who.every(id => f.people_ids.includes(id)) &&
+const filterPeopleMood = f => (!ui.tag || (f.labels || []).includes(ui.tag)) && ui.who.every(id => f.people_ids.includes(id)) &&
   (!ui.mood || (ui.mood === "un" ? !f.face_ids.length : feelings(f).some(x => x.emotion === ui.mood)));
 function peopleMoodControls() {
   const known = D.people.filter(p => (p.name || p.photos + p.videos > 1) && !ui.who.includes(p.person_id))
@@ -200,13 +202,17 @@ function peopleMoodControls() {
   const moods = el("select", { class: "mx-select", "aria-label": "Mood", onchange: e => { ui.mood = e.target.value; remember(); renderBody(); } },
     [["", "Any mood"], ...Object.keys(EMOJI).map(k => [k, `${EMOJI[k]} someone ${k}`]), ["un", "No face (un)"]]
       .map(([v, t]) => el("option", { value: v, selected: ui.mood === v }, t)));
-  return [add, ...chips, moods];
+  const counts = {};
+  D.files.forEach(f => (f.labels || []).forEach(t => counts[t] = (counts[t] || 0) + 1));
+  const tagSel = el("select", { class: "mx-select", "aria-label": "Tag", onchange: e => { ui.tag = e.target.value; remember(); render(); } },
+    el("option", { value: "" }, "Any tag"), Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([t, n]) => el("option", { value: t, selected: ui.tag === t }, `${t} (${fmt(n)})`)));
+  return [add, ...chips, moods, tagSel];
 }
 function viewAll() {
   const kind = el("select", { class: "mx-select", "aria-label": "Type", onchange: e => { ui.kind = e.target.value; renderBody(); } },
     [["", "All types"], ["photo", "Photos"], ["video", "Videos"], ["doc", "Documents"]].map(([v, t]) => el("option", { value: v, selected: ui.kind === v }, t)));
   simple(f => (!ui.kind || f.kind === ui.kind) && filterPeopleMood(f),
-    [T.thumb, T.id, T.name, T.kind, T.folder, T.taken, T.people, T.mood, T.feels, T.pids, T.fids, T.ests, T.tags, T.company, T.content, T.amount, T.camera, T.size, T.gps, T.dup],
+    [T.thumb, T.id, T.name, T.kind, T.folder, T.taken, T.people, T.labels, T.mood, T.feels, T.pids, T.fids, T.ests, T.tags, T.company, T.content, T.amount, T.camera, T.size, T.gps, T.dup],
     [kind, ...peopleMoodControls()], el("span", { class: "meta" }, ui.who.length > 1 ? "Showing photos with all of these people together." : "Moods are estimates. \"un\" means no face was found."));
 }
 function viewShots() { simple(f => f.screenshot, [T.thumb, T.id, T.name, T.taken, T.company, { h: "Sector", k: "sector" }, T.content, T.amount, T.txn, T.tags, T.text, T.folder]); }
@@ -326,6 +332,7 @@ function personDrawer(p) {
       el("h3", {}, `Faces (${faces.length})`), el("p", { class: "hint" }, "A face that isn't them? Use its menu to move it."),
       el("div", { class: "faces" }, faces.slice(0, 120).map(faceRow)),
       el("div", { class: "toolbar" }, el("h3", {}, `Photos & videos (${files.length})`), el("span", { class: "spacer" }),
+        el("button", { class: "mx-btn small", onclick: () => { close(); Object.assign(ui, { tab: "timeline", tl: p.person_id }); remember(); tabs(); render(); scrollTo(0, 0); } }, "Timeline"),
         el("button", { class: "mx-btn small", onclick: () => { close(); Object.assign(ui, { tab: "all", who: [p.person_id], mood: "", q: "", shown: 200 }); remember(); tabs(); render(); scrollTo(0, 0); } }, "Show in the table")),
       el("div", { class: "photos" }, files.slice(0, 300).map(f => el("img", { src: thumb(f), alt: f.name, loading: "lazy", onclick: () => viewer(f) })))));
   function close() { scrim.remove(); }
@@ -374,7 +381,7 @@ async function viewer(f) {
       row("Type", f.kind + (f.screenshot ? " (screenshot)" : "")), row("Folder", f.folder), row("Date", f.taken), row("Camera", f.camera),
       row("Size", `${size(f.bytes)}${f.width ? ` · ${f.width}×${f.height}` : ""}${f.duration ? ` · ${Math.round(f.duration)} s` : ""}`),
       row("GPS", f.lat != null ? el("a", { href: `https://maps.google.com/?q=${f.lat},${f.lon}`, target: "_blank", rel: "noopener" }, `${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}`) : ""),
-      row("People", f.people), row("Mood (est.)", mood(f) ? `${EMOJI[mood(f)] || ""} ${mood(f)}` : ""), row("Who feels what", whoFeels(f)), row("Things in it", f.tags), row("Company / app", f.company), row("What it is", f.content),
+      row("Tags", (f.labels || []).join(", ")), row("People", f.people), row("Mood (est.)", mood(f) ? `${EMOJI[mood(f)] || ""} ${mood(f)}` : ""), row("Who feels what", whoFeels(f)), row("Things in it", f.tags), row("Company / app", f.company), row("What it is", f.content),
       row("Amount", f.amount != null ? `${f.direction === "out" ? "paid " : f.direction === "in" ? "received " : ""}${money(f.amount)} ${f.currency}` : ""),
       row("IDs", f.txn_ids), row("Duplicate of", f.duplicate_of)),
     faces.length ? el("h3", {}, `Faces (${faces.length})`) : null,
@@ -421,63 +428,208 @@ async function demoApi(path, body) {
 paintIcons();
 load();
 
-/* ---------- Family: each family member's papers in folders (Certificates, ID, Insurance, Medical...) ---------- */
-const FOLDER_ICON = { certificates: "📜", resume: "💼", dna: "🧬", id: "🪪", insurance: "🛡️", medical: "🩺", education: "🎓",
-  finance: "💰", property: "🏠", vehicle: "🚗", travel: "✈️", other: "📁" };
-const ALWAYS = ["certificates", "resume", "dna", "id", "insurance", "medical"];  // shown even when empty
+/* ---------- Family: each member's folder tree, like a file browser (size and newest date per folder) ---------- */
 const niceDate = s => s ? new Date(s.replace(" ", "T")).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
 const newest = fs => fs.map(f => f.modified || "").sort().pop() || "";
+function familyTree(fs) {
+  const root = { name: "", kids: new Map(), files: [] };
+  const at = path => path.split("/").reduce((n, part) => {
+    if (!n.kids.has(part)) n.kids.set(part, { name: part, kids: new Map(), files: [] });
+    return n.kids.get(part);
+  }, root);
+  D.vault_tree.tree.forEach(at);
+  fs.forEach(f => at(f.vault.path).files.push(f));
+  const co = root.kids.get("4. Company");
+  if (co) co.kids.forEach(c => D.vault_tree.company.forEach(sub => { if (!c.kids.has(sub)) c.kids.set(sub, { name: sub, kids: new Map(), files: [] }); }));
+  const total = n => { const all = n.files.concat(...[...n.kids.values()].map(total)); n.all = all; return all; };
+  total(root);
+  return root;
+}
 function viewFamily() {
   const papers = D.files.filter(f => f.vault);
   const members = D.people.filter(p => p.family);
   const unsure = papers.filter(f => !f.vault.person_id || !byPerson[f.vault.person_id]);
-  const back = (label, fn) => el("button", { class: "mx-btn ghost small", onclick: fn }, icon("left"), label);
-  toolbar([], el("span", { class: "meta" }, "Found by the name printed in the paper, or the face in it. You can always change whose it is."));
-  $("toolbar").querySelector("input").hidden = !ui.famFolder;
+  ui.open = ui.open || {};
+  toolbar([], el("span", { class: "meta" }, "Papers are found by the name printed in them or the face in them; photos they're in are added to 2. Photos. You can change whose a paper is."));
   renderBody = () => {
     if (ui.fam == null) {
       if (!members.length) return $("view").replaceChildren(el("div", { class: "empty-help" },
         el("h3", {}, "No family members yet"),
-        el("p", { class: "hint" }, "Open a person on the People tab, give their full name (as printed on their documents) and tick Family member. Their IDs, certificates, resume, insurance, medical papers and passport-size photos get their own folders here and in the sorted copies (Family/<Name>/…)."),
+        el("p", { class: "hint" }, "Open a person on the People tab, give their full name (as printed on their documents) and tick Family member. They get the full folder tree: Documents, Photos, Medical, Company and Miscellaneous, filled with their papers."),
         el("button", { class: "mx-btn solid small", onclick: () => { ui.tab = "people"; remember(); tabs(); render(); } }, "Go to People")));
-      const card = (img, title, sub, n, when, fn) => el("div", { class: "pcard", onclick: fn },
+      const card = (img, title, sub, fs, fn) => el("div", { class: "pcard", onclick: fn },
         img, el("b", {}, title), sub ? el("span", { class: "pid" }, sub) : null,
-        el("span", { class: "stats" }, `${fmt(n)} papers`), when ? el("span", { class: "est" }, `Modified ${niceDate(when)}`) : null);
+        el("span", { class: "stats" }, `${fmt(fs.filter(f => !f.vault.extra).length)} papers · ${fmt(fs.filter(f => f.vault.extra).length)} photos`),
+        fs.length ? el("span", { class: "est" }, `${size(fs.reduce((a, f) => a + f.bytes, 0))} · Modified ${niceDate(newest(fs))}`) : null);
       return $("view").replaceChildren(el("div", { class: "people" },
-        members.map(p => { const fs = papers.filter(f => f.vault.person_id === p.person_id);
-          return card(el("img", { src: p.cover ? faceImg(p.cover) : "", alt: "" }), p.name || p.display, pid(p.person_id), fs.length, newest(fs),
-            () => { ui.fam = p.person_id; ui.famFolder = null; renderBody(); }); }),
-        unsure.length ? card(el("div", { class: "folder-ico" }, "❓"), "Not sure whose", "", unsure.length, newest(unsure),
-          () => { ui.fam = "unsure"; ui.famFolder = null; renderBody(); }) : null));
+        members.map(p => { const fs = papers.filter(f => f.vault.person_id === p.person_id || (f.vault.also || []).includes(p.person_id));
+          return card(el("img", { src: p.cover ? faceImg(p.cover) : "", alt: "" }), p.name || p.display, pid(p.person_id), fs,
+            () => { ui.fam = p.person_id; renderBody(); }); }),
+        unsure.length ? card(el("div", { class: "folder-ico" }, "❓"), "Not sure whose", "", unsure, () => { ui.fam = "unsure"; renderBody(); }) : null));
     }
     const who = ui.fam === "unsure" ? null : byPerson[ui.fam];
-    const mine = ui.fam === "unsure" ? unsure : papers.filter(f => f.vault.person_id === ui.fam);
+    const mine = ui.fam === "unsure" ? unsure : papers.filter(f => f.vault.person_id === ui.fam || (f.vault.also || []).includes(ui.fam));
     const title = who ? (who.name || who.display) : "Not sure whose";
-    if (!ui.famFolder) {
-      const keys = D.vault_folders.filter(v => ALWAYS.includes(v.key) || mine.some(f => f.vault.folder === v.key));
-      return $("view").replaceChildren(
-        el("div", { class: "toolbar" }, back("Family", () => { ui.fam = null; renderBody(); }), el("h3", { class: "crumb" }, title)),
-        el("div", { class: "folders" }, keys.map(v => {
-          const fs = mine.filter(f => f.vault.folder === v.key);
-          return el("button", { class: "folder" + (fs.length ? "" : " empty"), onclick: () => { ui.famFolder = v.key; renderBody(); } },
-            el("span", { class: "folder-ico" }, FOLDER_ICON[v.key] || "📁"),
-            el("span", { class: "folder-txt" }, el("b", {}, v.name), el("small", {}, v.what),
-              el("small", { class: "when" }, fs.length ? `${fmt(fs.length)} · Modified ${niceDate(newest(fs))}` : "Empty")));
-        })));
-    }
-    const folder = D.vault_folders.find(v => v.key === ui.famFolder) || { name: "" };
-    const rows = mine.filter(f => f.vault.folder === ui.famFolder && match(f, ui.q));
-    const whose = f => el("select", { class: "mx-select", "aria-label": "Whose is it?", onchange: async e => {
-      try { await api("/api/vault", { file_id: f.id, person_id: e.target.value, folder: f.vault.folder }); } catch (err) { return; }
+    const tree = familyTree(mine);
+    const whose = f => el("select", { class: "mx-select small", "aria-label": "Whose is it?", onclick: e => e.stopPropagation(), onchange: async e => {
+      try { await api("/api/vault", { file_id: f.id, person_id: e.target.value, folder: f.vault.extra ? null : f.vault.path }); } catch (err) { return; }
       toast("Saved. The sorted copy moves the next time you sort."); await load();
-    } }, el("option", { value: "" }, "Whose is it?"), members.map(p => el("option", { value: p.person_id, selected: f.vault.person_id === p.person_id }, p.name || p.display)),
+    } }, el("option", { value: "" }, "Whose?"), members.map(p => el("option", { value: p.person_id, selected: f.vault.person_id === p.person_id }, p.name || p.display)),
       el("option", { value: "none" }, "Not a family paper"), el("option", { value: "auto" }, "Decide automatically"));
+    const rows = [];
+    const walk = (n, depth, key) => {
+      for (const k of [...n.kids.values()]) {
+        const id = key + "/" + k.name, open = ui.open[id] ?? depth < 1;
+        rows.push(el("div", { class: "trow folder-row" + (k.all.length ? "" : " empty"), style: `--d:${depth}`, onclick: () => { ui.open[id] = !open; renderBody(); } },
+          el("span", { class: "tname" }, el("span", { class: "caret" }, k.kids.size || k.files.length ? (open ? "▾" : "▸") : ""), "📁 ", k.name),
+          el("span", { class: "tnum" }, k.all.length ? fmt(k.all.length) : ""),
+          el("span", { class: "tsize" }, size(k.all.reduce((a, f) => a + f.bytes, 0)) || "0 KB"),
+          el("span", { class: "tdate" }, k.all.length ? niceDate(newest(k.all)) : "—")));
+        if (open) {
+          walk(k, depth + 1, id);
+          k.files.sort((a, b) => (b.modified || "").localeCompare(a.modified || "")).forEach(f => rows.push(el("div", { class: "trow file-row", style: `--d:${depth + 1}`, onclick: () => viewer(f) },
+            el("span", { class: "tname" }, el("img", { src: thumb(f), alt: "", loading: "lazy" }), f.name,
+              f.vault.by ? el("span", { class: "tag" }, { name: "name in it", face: "face in it", you: "you chose" }[f.vault.by]) : null),
+            el("span", { class: "tnum" }, f.vault.extra ? "" : whose(f)),
+            el("span", { class: "tsize" }, size(f.bytes)), el("span", { class: "tdate" }, niceDate(f.modified)))));
+        }
+      }
+    };
+    walk(tree, 0, String(ui.fam));
     $("view").replaceChildren(
-      el("div", { class: "toolbar" }, back(title, () => { ui.famFolder = null; renderBody(); }), el("h3", { class: "crumb" }, `${FOLDER_ICON[ui.famFolder] || ""} ${folder.name}`)),
-      ...table(rows, [T.thumb, T.name, { h: "Type", k: "sub", v: f => f.vault.sub, r: f => f.vault.sub },
-        { h: "Modified", k: "modified", r: f => niceDate(f.modified) },
-        { h: "Found by", k: "by", v: f => f.vault.by, r: f => ({ name: "name in it", face: "face in it", you: "you chose" })[f.vault.by] || "" },
-        T.company, T.amount, { h: "Whose", r: whose }]));
+      el("div", { class: "toolbar" }, el("button", { class: "mx-btn ghost small", onclick: () => { ui.fam = null; renderBody(); } }, icon("left"), "Family"),
+        el("h3", { class: "crumb" }, `Family › ${title}`), el("span", { class: "spacer" }),
+        el("button", { class: "mx-btn small", onclick: () => { Object.keys(ui.open).forEach(k => { if (k.startsWith(ui.fam + "/")) delete ui.open[k]; }); walkAll(tree, String(ui.fam)); renderBody(); } }, "Open all"),
+        who ? el("button", { class: "mx-btn small", onclick: () => { Object.assign(ui, { tab: "timeline", tl: who.person_id }); remember(); tabs(); render(); } }, "Timeline") : null),
+      el("div", { class: "ftree" }, el("div", { class: "trow thead" }, el("span", { class: "tname" }, "Name"), el("span", { class: "tnum" }, "Files"),
+        el("span", { class: "tsize" }, "Size"), el("span", { class: "tdate" }, "Modified")), rows));
+    paintIcons($("view"));
   };
+  const walkAll = (n, key) => n.kids.forEach(k => { ui.open[key + "/" + k.name] = true; walkAll(k, key + "/" + k.name); });
   renderBody();
+}
+
+/* ---------- Timeline: one person's life in the library: map, phones, photos per month, moods ---------- */
+const MOODS = [["happy", "😊"], ["neutral", "😐"], ["surprised", "😮"], ["sad", "😢"], ["other", "😠"]];  // other: angry, scared, disgusted, contempt
+const moodKey = e => MOODS.some(m => m[0] === e) ? e : "other";
+const monthOf = s => (s || "").slice(0, 7);
+const monthName = m => new Date(m + "-01T00:00").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+function months(from, to) { const out = []; let [y, m] = from.split("-").map(Number); const [ty, tm] = to.split("-").map(Number);
+  while (y < ty || (y === ty && m <= tm)) { out.push(`${y}-${String(m).padStart(2, "0")}`); if (++m > 12) { m = 1; y++; } } return out; }
+let tip;
+function tooltip(e, html) {
+  if (!tip) { tip = el("div", { class: "viz-tip", role: "tooltip" }); document.body.append(tip); }
+  if (!html) { tip.hidden = true; return; }
+  tip.hidden = false; tip.innerHTML = html;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = Math.min(innerWidth - r.width - 8, e.clientX + 12) + "px";
+  tip.style.top = Math.max(8, e.clientY - r.height - 12) + "px";
+}
+function barChart(keys, stacks, series, label) {  // drawn at the box's real width once it is on the page
+  const box = el("div", { class: "viz-box" });
+  const draw = () => { const w = box.clientWidth; if (!w) return requestAnimationFrame(draw); box.replaceChildren(barSvg(keys, stacks, series, label, w)); };
+  requestAnimationFrame(draw);
+  addEventListener("resize", () => box.isConnected && box.replaceChildren(barSvg(keys, stacks, series, label, box.clientWidth)));
+  return box;
+}
+function barSvg(keys, stacks, series, label, W) {  // keys: months; stacks: {month: {series: n}}; one axis, counts
+  const H = 220, L = 30, B = 26, T = 10, max = Math.max(1, ...keys.map(k => series.reduce((a, s) => a + (stacks[k]?.[s[0]] || 0), 0)));
+  const step = (W - L) / keys.length, bw = Math.max(2, Math.min(28, step - 4));
+  const y = v => H - B - (v / max) * (H - B - T);
+  const NS = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, class: "viz", role: "img", "aria-label": label });
+  const ticks = [0, Math.ceil(max / 2), max];
+  ticks.forEach(v => { svg.append(mk("line", { x1: L, x2: W, y1: y(v), y2: y(v), class: "grid" }));
+    const t = mk("text", { x: L - 6, y: y(v) + 4, class: "axis", "text-anchor": "end" }); t.textContent = v; svg.append(t); });
+  const every = Math.ceil(keys.length / Math.max(2, Math.floor(W / 70)));
+  keys.forEach((k, i) => {
+    const x = L + i * step + (step - bw) / 2;
+    let base = 0;
+    const segs = series.map(s => [s, stacks[k]?.[s[0]] || 0]).filter(([, n]) => n);
+    segs.forEach(([s, n], j) => {
+      const y1 = y(base + n), y0 = y(base), top = j === segs.length - 1;
+      const h = Math.max(1, y0 - y1 - (j ? 2 : 0));  // 2px gap between stacked segments
+      const r = top ? Math.min(4, bw / 2, h) : 0;
+      const d = `M${x},${y1 + h} V${y1 + r} Q${x},${y1} ${x + r},${y1} H${x + bw - r} Q${x + bw},${y1} ${x + bw},${y1 + r} V${y1 + h} Z`;
+      svg.append(mk("path", { d, class: "mark", style: `fill:var(--${s[2]})` }));
+      base += n;
+    });
+    const hit = mk("rect", { x: L + i * step, y: T, width: step, height: H - B - T, class: "hit" });
+    hit.addEventListener("mousemove", e => tooltip(e, `<b>${monthName(k)}</b>` + series.map(s => `<div><i style="background:var(--${s[2]})"></i>${s[1]} <b>${stacks[k]?.[s[0]] || 0}</b></div>`).join("")));
+    hit.addEventListener("mouseleave", e => tooltip(e, null));
+    svg.append(hit);
+    if (i % every === 0) { const t = mk("text", { x: L + i * step + step / 2, y: H - 8, class: "axis", "text-anchor": "middle" }); t.textContent = monthName(k); svg.append(t); }
+  });
+  return svg;
+}
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  return new Promise((ok, bad) => {
+    const css = el("link", { rel: "stylesheet", href: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" });
+    const js = el("script", { src: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" });
+    js.onload = ok; js.onerror = bad;
+    document.head.append(css, js);
+  });
+}
+function viewTimeline() {
+  const people = D.people.filter(p => p.name || p.photos + p.videos > 2);
+  if (ui.tl == null || !byPerson[ui.tl]) ui.tl = (people[0] || {}).person_id;
+  const sel = el("select", { class: "mx-select", "aria-label": "Person", onchange: e => { ui.tl = +e.target.value; remember(); render(); } },
+    people.map(p => el("option", { value: p.person_id, selected: p.person_id === ui.tl }, `${p.display} · ${pid(p.person_id)}`)));
+  toolbar([sel], el("span", { class: "meta" }, "From the date, place and phone saved in each photo. Moods are estimates."));
+  $("toolbar").querySelector("input").hidden = true;
+  const p = byPerson[ui.tl];
+  if (!p) return $("view").replaceChildren(el("p", { class: "mx-empty" }, "No people yet."));
+  const files = p.files.map(i => byFile[i]).filter(f => f && f.taken).sort((a, b) => a.taken.localeCompare(b.taken));
+  const myFaces = D.faces.filter(x => x.person_id === p.person_id);
+  const faceIn = Object.fromEntries(myFaces.map(x => [x.file_ids[0], x]));
+  const ms = files.length ? months(monthOf(files[0].taken), monthOf(files[files.length - 1].taken)) : [];
+  const perMonth = {}, moodMonth = {};
+  files.forEach(f => { const m = monthOf(f.taken); (perMonth[m] = perMonth[m] || { n: 0 }).n++;
+    const x = faceIn[f.id]; if (x && x.emotion) { const k = moodKey(x.emotion); (moodMonth[m] = moodMonth[m] || {})[k] = (moodMonth[m][k] || 0) + 1; } });
+  const phones = {}; files.forEach(f => { if (f.camera) phones[f.camera] = (phones[f.camera] || 0) + 1; });
+  const geo = files.filter(f => f.lat != null);
+  const moodTotals = {}; Object.values(moodMonth).forEach(o => Object.entries(o).forEach(([k, n]) => moodTotals[k] = (moodTotals[k] || 0) + n));
+  const series = MOODS.map(([k, e], i) => [k, `${e} ${k}`, `series-${i + 1}`]);
+  const tableView = el("table", { class: "dtable small-table", hidden: true }, el("thead", {}, el("tr", {}, el("th", {}, "Month"), series.map(s => el("th", {}, s[1])))),
+    el("tbody", {}, ms.filter(m => moodMonth[m]).map(m => el("tr", {}, el("td", {}, monthName(m)), series.map(s => el("td", { class: "num" }, moodMonth[m][s[0]] || 0))))));
+  const chart = Object.keys(moodMonth).length ? barChart(ms, moodMonth, series, "Mood per month") : el("p", { class: "hint" }, "Their face was too small to read a mood.");
+  const mapBox = el("div", { class: "map", id: "map" }, el("p", { class: "hint" }, geo.length ? "Loading the map…" : "None of their photos has a saved place."));
+  const stat = (h, v, s) => el("div", { class: "mx-kpi" }, el("h3", {}, h), el("b", {}, v), el("small", {}, s || " "));
+  $("view").replaceChildren(
+    el("div", { class: "tl-head" }, el("img", { src: p.cover ? faceImg(p.cover) : "", alt: "" }),
+      el("div", {}, el("h2", {}, p.display, " ", el("span", { class: "pid" }, pid(p.person_id))),
+        el("p", { class: "hint" }, files.length ? `${niceDate(files[0].taken)} to ${niceDate(files[files.length - 1].taken)} · ${fmt(files.length)} photos and videos with a date` : "No dated photos yet."))),
+    el("section", { class: "mx-kpis", style: "--n:5" },
+      stat("Photos & videos", fmt(p.photos + p.videos), `${fmt(p.faces)} faces`), stat("Places", fmt(geo.length), "photos with a location"),
+      stat("Phones", fmt(Object.keys(phones).length), Object.keys(phones)[0] || ""), stat("Usually", p.emotion_usual || "—", "mood (est.)"),
+      stat("Age (est.)", p.age_est != null ? `~${p.age_est}` : "—", p.gender_est || "")),
+    el("div", { class: "tl-grid" },
+      el("div", { class: "card-box" }, el("h3", {}, "Where"), mapBox,
+        el("p", { class: "hint" }, "Map tiles come from OpenStreetMap: only the map area is requested, never your photos.")),
+      el("div", { class: "card-box" }, el("h3", {}, "Which phone"), Object.keys(phones).length ? el("div", { class: "hbars" },
+        Object.entries(phones).sort((a, b) => b[1] - a[1]).map(([k, n]) => el("div", { class: "hbar" }, el("span", {}, k), el("b", {}, fmt(n)),
+          el("i", { style: `width:${n / Math.max(...Object.values(phones)) * 100}%` })))) : el("p", { class: "hint" }, "No phone saved in their photos."))),
+    el("div", { class: "card-box" }, el("h3", {}, "Photos per month"), ms.length ? barChart(ms, Object.fromEntries(ms.map(m => [m, { n: perMonth[m]?.n || 0 }])), [["n", "Photos & videos", "series-1"]], "Photos per month") : el("p", { class: "hint" }, "No dates.")),
+    el("div", { class: "card-box" },
+      el("div", { class: "toolbar" }, el("h3", {}, "Mood over time (estimated)"), el("span", { class: "spacer" }),
+        el("button", { class: "mx-btn small", onclick: e => { tableView.hidden = !tableView.hidden; e.target.textContent = tableView.hidden ? "Show as table" : "Show as chart"; chart.hidden = !tableView.hidden; } }, "Show as table")),
+      el("div", { class: "legend" }, series.map(s => el("span", {}, el("i", { style: `background:var(--${s[2]})` }), `${s[1]} ${fmt(moodTotals[s[0]] || 0)}`))),
+      chart, tableView),
+    el("div", { class: "card-box" }, el("h3", {}, "Month by month"),
+      ...ms.filter(m => perMonth[m]).reverse().map(m => el("div", { class: "tl-month" }, el("b", {}, monthName(m)),
+        el("div", { class: "photos" }, files.filter(f => monthOf(f.taken) === m).map(f => {
+          const x = faceIn[f.id];
+          return el("img", { src: thumb(f), alt: f.name, loading: "lazy", title: `${niceDate(f.taken)}${f.camera ? " · " + f.camera : ""}${x && x.emotion ? " · " + x.emotion : ""}`, onclick: () => viewer(f) });
+        }))))));
+  if (geo.length) loadLeaflet().then(() => {
+    mapBox.replaceChildren();
+    const map = L.map(mapBox, { scrollWheelZoom: false });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap contributors" }).addTo(map);
+    const pts = geo.map(f => [f.lat, f.lon]);
+    L.polyline(pts, { color: getComputedStyle(document.body).getPropertyValue("--series-1").trim() || "#2a78d6", weight: 2, opacity: .6 }).addTo(map);
+    geo.forEach(f => L.circleMarker([f.lat, f.lon], { radius: 6, weight: 2, color: "#fff", fillColor: "#2a78d6", fillOpacity: 1 })
+      .bindPopup(`<img src="${thumb(f)}" width="120" alt=""><br><b>${niceDate(f.taken)}</b>${f.camera ? "<br>" + f.camera : ""}`).addTo(map));
+    map.fitBounds(L.latLngBounds(pts).pad(0.3));
+  }).catch(() => mapBox.replaceChildren(el("p", { class: "hint" }, "The map needs an internet connection. Places: " + geo.map(f => `${f.lat.toFixed(3)}, ${f.lon.toFixed(3)}`).slice(0, 10).join(" · "))));
 }

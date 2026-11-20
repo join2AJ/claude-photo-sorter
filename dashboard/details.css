@@ -109,3 +109,48 @@ table.dtable { border-collapse: separate; border-spacing: 0; width: 100%; font-s
 .check-line { display: flex; gap: 8px; align-items: center; color: var(--ink-2); font-size: 13px; }
 .empty-help { border: 1px dashed var(--border); border-radius: var(--r-lg); padding: 24px; max-width: 640px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .empty-help h3 { margin: 0; }
+/* family folder tree */
+.ftree { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.trow { display: grid; grid-template-columns: 1fr 150px 90px 120px; gap: 10px; align-items: center; padding: 7px 14px; border-bottom: 1px solid var(--hair); font-size: 13px; cursor: pointer; }
+.trow:hover { background: var(--tone-40); }
+.trow.thead { cursor: default; background: var(--tone-40); color: var(--ink-3); font-weight: 600; font-size: 12px; }
+.trow .tname { padding-left: calc(var(--d, 0) * 22px); display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.trow .caret { width: 12px; color: var(--faint); flex: none; }
+.trow.empty { color: var(--faint); }
+.trow .tnum, .trow .tsize, .trow .tdate { color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 12px; }
+.trow .tsize { text-align: right; }
+.file-row .tname img { width: 26px; height: 26px; border-radius: 5px; object-fit: cover; flex: none; }
+.mx-select.small { height: 26px; font-size: 11.5px; padding: 0 6px; }
+@media (max-width: 700px) { .trow { grid-template-columns: 1fr 70px 80px; } .trow .tdate { display: none; } }
+/* tags */
+.tagbtn { border: 0; cursor: pointer; font: inherit; font-size: 11px; }
+.tagbtn:hover, .tagbtn.on { background: var(--brand-tint); color: var(--brand); }
+.dtable td.tags-cell { max-width: 320px; }
+/* timeline */
+.viz-root, body.details { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4; }
+:root[data-theme="dark"] body.details { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; }
+.tl-head { display: flex; gap: 14px; align-items: center; }
+.tl-head img { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; }
+.tl-head h2 { margin: 0; }
+.tl-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+.card-box { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card-box h3 { margin: 0; font-size: 14px; }
+.map { height: 340px; border-radius: 10px; overflow: hidden; background: var(--tone-40); display: grid; place-items: center; }
+.hbars { display: flex; flex-direction: column; gap: 10px; }
+.hbar { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; font-size: 12.5px; }
+.hbar i { grid-column: 1 / -1; display: block; height: 10px; border-radius: 0 4px 4px 0; background: var(--series-1); }
+.hbar b { font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+svg.viz { width: 100%; height: auto; display: block; }
+.viz-box { width: 100%; min-height: 220px; }
+svg.viz .grid { stroke: var(--hair); stroke-width: 1; }
+svg.viz .axis { fill: var(--ink-3); font-size: 11px; font-family: var(--font); }
+svg.viz .hit { fill: transparent; }
+svg.viz .hit:hover { fill: var(--tone-40); fill-opacity: .5; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); }
+.legend i, .viz-tip i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.viz-tip { position: fixed; z-index: 99; pointer-events: none; background: var(--paper); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: var(--shadow-lift); }
+.viz-tip div { margin-top: 2px; } .viz-tip b { font-variant-numeric: tabular-nums; }
+.small-table { font-size: 12px; } .small-table td, .small-table th { padding: 5px 10px; }
+.tl-month { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--hair); }
+.tl-month .photos { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+@media (max-width: 860px) { .tl-grid { grid-template-columns: 1fr; } }

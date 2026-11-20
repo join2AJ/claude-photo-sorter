@@ -224,6 +224,9 @@ def money(lo, hi):
 def finish(f, im, found, key, kind, when):
     """Save the pictures and faces of one made-up file and add it to the library."""
     global i, fid
+    import tags as tagmod
+    if kind != "doc" and not f.get("screenshot"):
+        f["colors"] = ",".join(tagmod.color_tags(im))
     im.save(os.path.join(OUT, "thumbs", f"{i}.jpg"), quality=78)
     im.resize((72, 72)).save(os.path.join(OUT, "mini", f"{i}.jpg"), quality=72)
     for p, emo, box, bg in found:
@@ -297,6 +300,10 @@ for c in cats:
                 f.update(company=app, sector=sector, content=what, text=f"{app}\n(made-up demo text)")
         else:
             im = draw(key, found)
+            if key in ("people", "vclips") and rnd.random() < .2:
+                f["tags"] = "restaurant, plate, pizza"  # made up: a meal out
+            elif key in ("people", "selfies") and rnd.random() < .15:
+                f["tags"] = rnd.choice(["seashore, sandbar", "alp, valley", "palace, dome", "stage, spotlight"])
             video = kind == "video"
             f.update(name=f"{'VID' if video else 'IMG'}_{4000 + i}.{'MOV' if video else 'JPG'}", ext=".mov" if video else ".jpg",
                      camera=rnd.choice(["Apple iPhone 14", "Apple iPhone 13", "Samsung Galaxy S23", "Google Pixel 8"]),
@@ -307,35 +314,67 @@ for c in cats:
         finish(f, im, found, key, kind, when)
 
 # ---------- family papers (made up): each family member's IDs, certificates, insurance, medical... ----------
-PAPERS = [
+COMPANIES_DEMO = ["Northwind Technologies Pvt Ltd", "Contoso Ltd", "Fabrikam Limited"]  # made-up employers
+PAPERS = [  # one for every folder of the family tree (vault.py), all made up
     ("Certificate - ISO 27001 Lead Auditor.pdf", "This is to certify that {NAME} has successfully completed ISO 27001 Lead Auditor training"),
-    ("Certificate - Python for security automation.pdf", "Certificate of completion. {NAME} has successfully completed the course"),
-    ("{FIRST} resume - security automation, GRC.docx", "{NAME}\nProfessional summary: security automation, GRC, ISO 27001\nWork experience"),
-    ("Fingerprint record.pdf", "Biometric fingerprint record of {NAME}"),
+    ("Certificate - CISSP.pdf", "Certified Information Systems Security Professional. {NAME} certification"),
+    ("Degree certificate.pdf", "University convocation. Bachelor of Technology degree awarded to {NAME}"),
+    ("Class 12 marksheet.pdf", "Statement of marks. {UPPER}"),
+    ("{FIRST} resume - Information Security.docx", "{NAME}\nProfessional summary: information security, ISO 27001, GRC, risk assessment"),
+    ("{FIRST} resume - Data Analytics.docx", "{NAME}\nProfessional summary: data analytics, Power BI, Tableau, SQL"),
+    ("{FIRST} resume - SIEM.docx", "{NAME}\nProfessional summary: SIEM, Splunk, QRadar, SOC analyst"),
+    ("{FIRST} resume - Security Automation.docx", "{NAME}\nProfessional summary: security automation, SOAR, Python scripting"),
+    ("{FIRST} resume - Physical Security.docx", "{NAME}\nProfessional summary: physical security, CCTV, access control"),
+    ("Exam notes.txt", "Semester exam syllabus and lecture notes of {NAME}"),
+    ("Credit card bill {YEAR}.pdf", "Credit card statement bill. Card holder {NAME}. Amount payable INR 12,480"),
+    ("Form 16 {YEAR}.pdf", "Form 16 TDS certificate. Employee {UPPER}"),
+    ("ITR acknowledgement {YEAR}.pdf", "Income tax return acknowledgement. Name {UPPER}"),
+    ("Bank statement {YEAR}.pdf", "Account statement. Account holder {NAME}. Opening balance"),
     ("Aadhaar.pdf", "Unique Identification Authority of India\n{UPPER}\nAadhaar"),
     ("PAN card.pdf", "INCOME TAX DEPARTMENT Permanent Account Number card {UPPER}"),
     ("Passport.pdf", "Republic of India Passport No Z1234567 {UPPER}"),
-    ("Health insurance policy.pdf", "Health insurance policy schedule. Insured: {NAME}. Premium INR 18,400"),
-    ("Term plan.pdf", "Term insurance policy. Life assured {NAME}. Sum assured INR 1,00,00,000"),
-    ("Car insurance.pdf", "Private car package policy. Policyholder {NAME}. Premium INR 12,900"),
+    ("Driving licence.pdf", "Driving licence. Name {UPPER}"),
+    ("Fingerprint record.pdf", "Biometric fingerprint record of {NAME}"),
+    ("Rent agreement.pdf", "Rent agreement between the owner and the tenant {NAME}"),
+    ("Flat sale deed.pdf", "Sale deed. Purchaser {NAME}. Property tax paid"),
+    ("Bike RC.pdf", "Registration certificate. Two wheeler. Owner {UPPER}. Chassis no"),
     ("Bike insurance.pdf", "Two wheeler package policy. Insured {NAME}"),
-    ("Prescription.pdf", "Dr. S. Rao Clinic. Patient: {NAME}. Rx Tab. Paracetamol 500 twice daily"),
+    ("Car insurance.pdf", "Private car package policy. Policyholder {NAME}"),
+    ("Car PUC.pdf", "Pollution under control certificate. Private car of {NAME}"),
+    ("Legal notice.pdf", "Legal notice from advocate on behalf of {NAME}"),
+    ("Notarised affidavit.pdf", "Affidavit by {NAME} before notary"),
+    ("Employee ID card.jpg.pdf", "Employee ID card. {NAME}. Employee code 4471"),
     ("Blood test report.pdf", "Laboratory report. Patient {NAME}. Haemoglobin 13.8 g/dL reference range"),
-    ("Hospital invoice.pdf", "City Hospital invoice. Patient {NAME}. Amount INR 8,250"),
-    ("Degree certificate.pdf", "University convocation. Bachelor of Technology awarded to {NAME}"),
-    ("Form 16 {YEAR}.pdf", "Form 16 TDS certificate. Employee {UPPER}"),
+    ("MRI scan report.pdf", "MRI scan report of {NAME}"),
+    ("Prescription.pdf", "Dr. S. Rao Clinic. Patient: {NAME}. Rx Tab. Paracetamol 500 twice daily"),
+    ("Vaccination certificate.pdf", "Final certificate for COVID-19 vaccination. Beneficiary {NAME}. CoWIN"),
+    ("Discharge summary.pdf", "City Hospital discharge summary. Patient {NAME}"),
+    ("Health insurance policy.pdf", "Health insurance policy schedule. Insured: {NAME}. Family floater"),
+    ("Term plan policy.pdf", "Term insurance policy schedule. Life assured {NAME}. Sum assured INR 1,00,00,000"),
+    ("Premium receipt {YEAR}.pdf", "Renewal premium receipt. Policyholder {NAME}"),
+    ("Annual policy statement {YEAR}.pdf", "Annual policy statement for the year. {NAME}"),
+    ("Gym membership.pdf", "Fitness gym membership and diet plan for {NAME}"),
+    ("Offer letter - {COMPANY}.pdf", "{COMPANY}\nDear {NAME}, we are pleased to offer you the position. Offer letter"),
+    ("Payslip - {COMPANY}.pdf", "{COMPANY}\nPayslip for the month. Employee {NAME}"),
+    ("Relieving letter - {COMPANY}.pdf", "{COMPANY}\nRelieving letter. This is to confirm that {NAME} has been relieved"),
+    ("Training nomination - {COMPANY}.pdf", "{COMPANY}\nTraining nomination for {NAME}. Sponsored course"),
+    ("Flight ticket.pdf", "E-ticket. Boarding pass. Passenger {UPPER}"),
 ]
 for n in FAMILY:
     p = people[n - 1]
     full = p["name"]
-    for tmpl, text in rnd.sample(PAPERS, 11):
+    # Asha: the full sample, with papers from three employers; the others: a few papers
+    papers = [(t, x, COMPANIES_DEMO[0]) for t, x in PAPERS] if n == 1 else [(t, x, rnd.choice(COMPANIES_DEMO)) for t, x in rnd.sample(PAPERS, 12)]
+    if n == 1:
+        papers += [(t, x, c) for c in COMPANIES_DEMO[1:] for t, x in PAPERS if "{COMPANY}" in t and "Training" not in t]
+    for tmpl, text, company in papers:
         when = start + timedelta(days=rnd.randint(0, 3 * 365), minutes=rnd.randint(0, 1440))
-        name = tmpl.format(FIRST=full.split()[0], YEAR=when.year)
+        name = tmpl.format(FIRST=full.split()[0], YEAR=when.year, COMPANY=company.split(" Pvt")[0].split(" Ltd")[0].split(" Limited")[0])
         ext = os.path.splitext(name)[1]
         f = {"id": i, "sha256": f"demo{i}", "kind": "doc", "path": "", "folder": catby["dids"]["label"], "folder_key": "dids",
              "duplicate_of": "", "copy": "", "taken": when.strftime("%Y-%m-%d %H:%M"), "camera": "", "lens": None, "lat": None, "lon": None,
              "width": None, "height": None, "duration": None, "screenshot": False, "tags": "", "name": name, "ext": ext,
-             "text": text.format(NAME=full, UPPER=full.upper()) + "\n(made-up demo document)", "company": "", "sector": "",
+             "text": text.format(NAME=full, UPPER=full.upper(), COMPANY=company) + "\n(made-up demo document)", "company": "", "sector": "",
              "content": "", "amount": None, "currency": "", "direction": "", "txn_ids": "", "error": "", "analysed": True,
              "face_ids": [], "people_ids": []}
         finish(f, paper(ext, name), [], "dids", "doc", when)
@@ -420,13 +459,17 @@ for fc in faces:
 import vault
 for f in files:
     f["modified"] = f["taken"]
+import tags as tagmod
+fby = {x["face_id"]: x for x in faces}
+for f in files:
+    f["labels"] = tagmod.make_labels(f, [fby[i] for i in f["face_ids"] if i in fby], plist)
 vmap = vault.assign(files, {x["face_id"]: x for x in faces}, plist)
 for f in files:
     f["vault"] = vmap.get(f["id"])
-VAULT_FOLDERS = [{"key": k, "name": n, "what": w} for k, n, w, _ in vault.FOLDERS] + [dict(zip(("key", "name", "what"), vault.OTHER))]
+VAULT_TREE = {"tree": vault.TREE, "company": vault.COMPANY_SUB}
 source = {"source": "~/Pictures/Camera roll (demo)", "sorted": "~/Pictures/Camera roll (demo) (sorted)"}
 details = {"files": files, "faces": faces, "source": source, "categories": cats, "running": False, "demo": True,
-           "vault_folders": VAULT_FOLDERS,
+           "vault_tree": VAULT_TREE,
            "people": sorted(plist.values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))}
 for name, obj in (("inventory.json", inv), ("labels.json", labels), ("dupes.json", dupes), ("categories.json", cats),
                   ("source.json", {"source": source["source"]}), ("details.json", details)):

@@ -50,16 +50,24 @@ for k, v in load(OVERRIDES, {}).items():  # moves made by hand in the dashboard 
 
 save(os.path.join(DATA, "labels.json"), labels)
 
-# family papers go to Family/<Name>/<Folder>/ instead (see vault.py)
-family_dir = {}
+# family papers go to Family/<Name>/<their folder tree>/ instead; photos they're in are also copied there (vault.py)
+family_dir, family_extra, family_roots = {}, {}, []
 try:
     import details, vault
     L = details.library()
+    home = lambda p: os.path.join("Family", vault.safe(p["name"] or p["display"]))
+    for p in L["people"].values():
+        if p.get("family"):
+            family_roots.append(home(p))
     for f in L["files"]:
         v = f.get("vault")
-        if v and v["person_id"] in L["people"]:
-            p = L["people"][v["person_id"]]
-            family_dir[f["id"]] = os.path.join("Family", vault.safe(p["name"] or p["display"]), vault.safe(v["folder_name"]))
+        if not v or v["person_id"] not in L["people"]:
+            continue
+        where = [os.path.join(home(L["people"][i]), *v["path"].split("/")) for i in [v["person_id"]] + v.get("also", []) if i in L["people"]]
+        if v.get("extra"):
+            family_extra[f["id"]] = where
+        else:
+            family_dir[f["id"]] = where[0]
 except Exception as e:  # never stop the sort over this
     print(f"  (family folders skipped: {e})", flush=True)
 src_info = load(os.path.join(DATA, "source.json"), {})
@@ -111,10 +119,20 @@ with open(os.path.join(dest, "sorted.csv"), "w", newline="") as fc, \
         if not os.path.exists(target):
             copy(r["path"], target)
         wc.writerow([os.path.relpath(target, dest), folder, r["path"]])
+        for extra in family_extra.get(r["id"], []):  # a copy in each family member's 2. Photos folder
+            os.makedirs(os.path.join(dest, extra), exist_ok=True)
+            t2 = os.path.join(dest, extra, os.path.basename(target))
+            if not os.path.exists(t2):
+                copy(r["path"], t2)
+            wc.writerow([os.path.relpath(t2, dest), extra, r["path"]])
         if n % 25 == 0 or n == len(recs):
             print(f"PROGRESS {n} {len(recs)}", flush=True)
         if n % 500 == 0:
             print(f"  copied {n}/{len(recs)}", flush=True)
+
+for root in family_roots:  # the whole folder tree, empty folders too
+    for sub in vault.TREE:
+        os.makedirs(os.path.join(dest, root, *sub.split("/")), exist_ok=True)
 
 # folders show the date of their newest file as "Modified" (like 9 Jan 2021), not today's date
 newest = {}
@@ -134,6 +152,6 @@ for k, c in cats.items():
     print(f"  {c['label']:24} {counts.get(k, 0)}")
 print(f"  {'_Review/duplicates':24} {len(dupe_of)}")
 if family_dir:
-    print(f"  {'Family':24} {len(family_dir)} papers of {len({p.split(os.sep)[1] for p in family_dir.values()})} people")
+    print(f"  {'Family':24} {len(family_dir)} papers, {sum(map(len, family_extra.values()))} photo copies, {len(family_roots)} people")
 if missing or fixed:
     print(f"  ({missing} files had no label and {fixed} had a wrong-type label; they went to the last folder of their kind)")

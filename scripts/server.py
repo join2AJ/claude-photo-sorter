@@ -465,9 +465,9 @@ def details_json():
         f["text"] = f["text"][:600]
     people = sorted(L["people"].values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))
     import vault
-    folders = [{"key": k, "name": n, "what": w} for k, n, w, _ in vault.FOLDERS] + [dict(zip(("key", "name", "what"), vault.OTHER))]
     return {"files": L["files"], "faces": L["faces"], "people": people, "source": L["source"],
-            "categories": L["categories"], "running": job["running"], "vault_folders": folders}
+            "categories": L["categories"], "running": job["running"],
+            "vault_tree": {"tree": vault.TREE, "company": vault.COMPANY_SUB}}
 
 
 def file_text(i):

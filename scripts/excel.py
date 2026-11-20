@@ -87,7 +87,7 @@ def build(out, L=None, base=DATA):
     ws = wb.active
     ws.title = "All files"
     hdr = ["Preview", "File ID", "Name", "Type", "Folder", "Date taken", "Camera / phone", "People in it", "Mood (est.)",
-           "Who feels what (est.)", "Person IDs", "Face IDs", "Faces", "Ages (est.)", "Genders (est.)", "Emotions (est.)", "Things in it", "Screenshot",
+           "Who feels what (est.)", "Person IDs", "Face IDs", "Faces", "Ages (est.)", "Genders (est.)", "Emotions (est.)", "Tags", "Screenshot",
            "Company / app", "Kind of content", "Amount", "Currency", "Money in/out", "Transaction / order IDs",
            "Size (MB)", "Width", "Height", "Length (s)", "GPS", "Duplicate of", "Original file", "Sorted copy"]
     face_by_id = {f["face_id"]: f for f in faces}
@@ -97,7 +97,7 @@ def build(out, L=None, base=DATA):
         rows.append(["", f["id"], f["name"], f["kind"], f["folder"], f["taken"], f["camera"], f["people"],
                      mood(fs), ", ".join(f"{x['person']}: {x['emotion']}" for x in fs if x["emotion"]), ", ".join(pid(i) for i in f["people_ids"]) or NO_FACE, ", ".join(fid(i) for i in f["face_ids"]),
                      len(f["face_ids"]), ", ".join(x["age"] or "?" for x in fs), ", ".join(x["gender"] or "?" for x in fs),
-                     ", ".join(x["emotion"] or "?" for x in fs), f["tags"], "yes" if f["screenshot"] else "",
+                     ", ".join(x["emotion"] or "?" for x in fs), ", ".join(f.get("labels") or []) or f["tags"], "yes" if f["screenshot"] else "",
                      f["company"], f["content"], f["amount"], f["currency"], f["direction"], f["txn_ids"],
                      mb(f["bytes"]), f["width"], f["height"], round(f["duration"], 1) if f["duration"] else None,
                      f"{f['lat']:.5f}, {f['lon']:.5f}" if f["lat"] is not None else "", f["duplicate_of"], "", ""])
@@ -143,15 +143,15 @@ def build(out, L=None, base=DATA):
     fam = [f for f in files if f.get("vault")]
     if fam:
         ws = wb.create_sheet("Family documents")
-        hdr = ["Preview", "Whose", "Person ID", "Folder", "Type", "File", "File ID", "Modified", "Found by", "Company",
+        hdr = ["Preview", "Whose", "Person ID", "Folder", "Folder path", "File", "File ID", "Modified", "Found by", "Company",
                "Amount", "Sorted copy", "Original file"]
         name_of = lambda v: people[v["person_id"]]["display"] if v["person_id"] in people else "Not sure whose"
-        fam.sort(key=lambda f: (name_of(f["vault"]) == "Not sure whose", name_of(f["vault"]), f["vault"]["folder_name"], f["modified"] or ""))
+        fam.sort(key=lambda f: (name_of(f["vault"]) == "Not sure whose", name_of(f["vault"]), f["vault"]["path"], f["modified"] or ""))
         rows = [["", name_of(f["vault"]), pid(f["vault"]["person_id"]) if f["vault"]["person_id"] else "", f["vault"]["folder_name"],
-                 f["vault"]["sub"], f["name"], f["id"], f["modified"],
+                 f["vault"]["path"], f["name"], f["id"], f["modified"],
                  {"name": "name in the document", "face": "face in it", "you": "you chose"}.get(f["vault"]["by"], ""),
                  f["company"], f["amount"], "", ""] for f in fam]
-        table(ws, "FamilyDocs", hdr, rows, [9, 20, 10, 18, 16, 30, 8, 16, 18, 18, 11, 40, 40], style="TableStyleMedium10",
+        table(ws, "FamilyDocs", hdr, rows, [9, 20, 10, 22, 60, 30, 8, 16, 18, 18, 11, 40, 40], style="TableStyleMedium10",
               pics=[os.path.join(base, "mini", f"{f['id']}.jpg") for f in fam], pic_col=1, row_h=48)
         for n, f in enumerate(fam, 2):
             link(ws.cell(n, 12), f["copy"])
