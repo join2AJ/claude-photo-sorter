@@ -313,6 +313,22 @@ for c in cats:
                 f.update(lat=round(lat + rnd.uniform(-.05, .05), 5), lon=round(lon + rnd.uniform(-.05, .05), 5))
         finish(f, im, found, key, kind, when)
 
+# ---------- three made-up events: many photos within a few hours, the same place ----------
+for title, day, n_photos, place, tag in [("wedding", datetime(2024, 12, 14, 17, 0), 48, (26.9124, 75.7873), "stage, spotlight"),
+                                         ("birthday", datetime(2025, 3, 8, 19, 30), 24, (12.9716, 77.5946), "balloon, plate, pizza"),
+                                         ("office party", datetime(2024, 6, 21, 18, 0), 20, (19.076, 72.8777), "restaurant, plate, cup")]:
+    for k in range(n_photos):
+        when = day + timedelta(minutes=k * rnd.randint(3, 9))
+        found = []
+        im = draw("people", found)
+        f = {"id": i, "sha256": f"demo{i}", "kind": "photo", "path": "", "folder": catby["people"]["label"], "folder_key": "people",
+             "duplicate_of": "", "copy": "", "taken": when.strftime("%Y-%m-%d %H:%M"), "camera": rnd.choice(["Apple iPhone 14", "Samsung Galaxy S23"]),
+             "lens": None, "lat": round(place[0] + rnd.uniform(-.002, .002), 5), "lon": round(place[1] + rnd.uniform(-.002, .002), 5),
+             "width": 4032, "height": 3024, "duration": None, "screenshot": False, "tags": tag, "name": f"IMG_{7000 + i}.JPG", "ext": ".jpg",
+             "text": "", "company": "", "sector": "", "content": "", "amount": None, "currency": "", "direction": "", "txn_ids": "",
+             "error": "", "analysed": True, "face_ids": [], "people_ids": []}
+        finish(f, im, found, "people", "photo", when)
+
 # ---------- family papers (made up): each family member's IDs, certificates, insurance, medical... ----------
 COMPANIES_DEMO = ["Northwind Technologies Pvt Ltd", "Contoso Ltd", "Fabrikam Limited"]  # made-up employers
 PAPERS = [  # one for every folder of the family tree (vault.py), all made up
@@ -419,7 +435,7 @@ for p in people:
     n = p["person_id"]
     named = n <= 6
     plist[n] = {"person_id": n, "name": p["name"] if named else None,
-                "mobile": f"+91 90000 000{n:02d}" if n <= 4 else None, "mobile_verified": 0,
+                "mobile": f"+91 90000 000{n:02d}" if n <= 4 else None, "mobile_verified": 1 if n <= 4 else 0,
                 "consent": ["yes", "yes", "no", "pending"][n - 1] if n <= 4 else "pending",
                 "consent_at": "2025-06-01 10:00:00" if n <= 3 else None,
                 "share_with": "2,3" if n == 1 else "", "hide_from": "4" if n == 3 else "",
@@ -468,7 +484,16 @@ for f in files:
     f["vault"] = vmap.get(f["id"])
 VAULT_TREE = {"tree": vault.TREE, "company": vault.COMPANY_SUB}
 source = {"source": "~/Pictures/Camera roll (demo)", "sorted": "~/Pictures/Camera roll (demo) (sorted)"}
+cover = lambda n: f"demo/faces/{plist[n]['cover']}.jpg"
+REQUESTS = [  # made-up sign-ups from the sharing app
+    {"id": 3, "mobile": "+91 90000 00005", "status": "pending", "person_id": 5, "score": 0.81, "at": "2025-06-02 10:12:00", "selfie": cover(5)},
+    {"id": 2, "mobile": "+91 98888 12345", "status": "conflict", "person_id": 1, "score": 0.77, "at": "2025-06-01 21:40:00", "selfie": cover(1)},
+    {"id": 1, "mobile": "+91 90000 00001", "status": "approved", "person_id": 1, "score": 0.93, "at": "2025-06-01 09:05:00", "selfie": cover(1)},
+]
+ALERTS = [{"id": 1, "kind": "impersonation", "person_id": 1, "mobile": "+91 98888 12345", "seen": 0, "at": "2025-06-01 21:40:00",
+           "detail": "Someone with +91 ••••• 345 tried to sign up with the face of P0001, which is registered to another number (match 77%). They were blocked."}]
 details = {"files": files, "faces": faces, "source": source, "categories": cats, "running": False, "demo": True,
+           "requests": REQUESTS, "alerts": ALERTS,
            "vault_tree": VAULT_TREE,
            "people": sorted(plist.values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))}
 for name, obj in (("inventory.json", inv), ("labels.json", labels), ("dupes.json", dupes), ("categories.json", cats),

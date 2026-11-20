@@ -272,9 +272,11 @@ class H(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def send_json(self, obj, code=200):
+    def send_json(self, obj, code=200, cookie=None):
         b = json.dumps(obj).encode()
         self.send_response(code)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Cache-Control", "no-store")
@@ -292,10 +294,56 @@ class H(SimpleHTTPRequestHandler):
         self.send_error(403, "Open the photo sorter at http://127.0.0.1:%d" % PORT)
         return False
 
+    # ---------- the sharing app (share.html): guests sign in with a mobile code and a live selfie ----------
+    def guest_token(self):
+        m = re.search(r"(?:^|;\s*)ps_session=([A-Za-z0-9_\-]+)", self.headers.get("Cookie", ""))
+        return m.group(1) if m else None
+
+    def guest(self, method, path, body=None):
+        sys.path.insert(0, SCRIPTS)
+        import sharing
+        tok = self.guest_token()
+        try:
+            if method == "GET" and path == "/share/api/me":
+                return self.send_json(sharing.me(tok))
+            m = re.match(r"^/share/api/(photo|thumb)/(\d+)$", path)
+            if method == "GET" and m:
+                b = sharing.photo(tok, int(m.group(2)), 1600 if m.group(1) == "photo" else 520)
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(b)))
+                self.send_header("Cache-Control", "private, no-store")
+                self.end_headers()
+                return self.wfile.write(b)
+            if method == "POST" and path == "/share/api/code":
+                return self.send_json(sharing.send_code(body.get("mobile")))
+            if method == "POST" and path == "/share/api/verify":
+                token = sharing.verify_code(body.get("mobile"), body.get("code"))
+                return self.send_json(sharing.me(token), cookie=f"ps_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={sharing.SESSION_TTL}")
+            if method == "POST" and path == "/share/api/selfie":
+                sharing.selfie(tok, body.get("frames") or [])
+                return self.send_json(sharing.me(tok))
+            if method == "POST" and path == "/share/api/consent":
+                sharing.set_consent(tok, body)
+                return self.send_json(sharing.me(tok))
+            if method == "POST" and path == "/share/api/forget":
+                sharing.forget_me(tok)
+                return self.send_json(sharing.me(tok))
+            if method == "POST" and path == "/share/api/logout":
+                sharing.logout(tok)
+                return self.send_json({"stage": "signed-out"}, cookie="ps_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+            return self.send_json({"error": "not found"}, 404)
+        except PermissionError as e:
+            return self.send_json({"error": str(e)}, 403)
+        except Exception as e:
+            return self.send_json({"error": str(e)}, 400)
+
     def do_GET(self):
         if not self.host_ok():
             return
         u = urllib.parse.urlparse(self.path)
+        if u.path.startswith("/share/api/"):
+            return self.guest("GET", u.path)
         if u.path == "/api/details":
             return self.send_json(details_json())
         m = re.match(r"^/api/text/(\d+)$", u.path)
@@ -391,6 +439,8 @@ class H(SimpleHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
         p = urllib.parse.urlparse(self.path).path
+        if p.startswith("/share/api/"):
+            return self.guest("POST", p, body)
         try:
             if p == "/api/sort":
                 sort_all(body)
@@ -425,6 +475,18 @@ class H(SimpleHTTPRequestHandler):
                     open_path(path if os.path.isdir(path) else src["sorted"])
                 else:
                     raise ValueError("Sort first, then the folders can be opened.")
+            elif p == "/api/face-search":
+                sys.path.insert(0, SCRIPTS)
+                import facesearch
+                return self.send_json(facesearch.search(body.get("image") or ""))
+            elif p == "/api/enrollment":
+                sys.path.insert(0, SCRIPTS)
+                import sharing
+                sharing.decide(int(body["id"]), body.get("action"), body.get("person_id"))
+                return self.send_json({"ok": True})
+            elif p == "/api/alert-seen":
+                db_conn().execute("UPDATE alerts SET seen=1").connection.commit()
+                return self.send_json({"ok": True})
             elif p == "/api/person":
                 update_person(body)
                 return self.send_json({"ok": True})
@@ -465,7 +527,9 @@ def details_json():
         f["text"] = f["text"][:600]
     people = sorted(L["people"].values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))
     import vault
-    return {"files": L["files"], "faces": L["faces"], "people": people, "source": L["source"],
+    import sharing
+    reqs, alerts = sharing.requests_and_alerts()
+    return {"files": L["files"], "faces": L["faces"], "people": people, "source": L["source"], "requests": reqs, "alerts": alerts,
             "categories": L["categories"], "running": job["running"],
             "vault_tree": {"tree": vault.TREE, "company": vault.COMPANY_SUB}}
 

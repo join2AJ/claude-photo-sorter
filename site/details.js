@@ -78,7 +78,7 @@ async function load() {
   if (DEMO && D.people.length) { indexes(); kpis(); tabs(); render(); return; }  // the demo keeps edits in memory
   try { D = DEMO ? await fetch(BASE + "details.json").then(r => r.json()) : await api("/api/details"); }
   catch (e) { $("view").replaceChildren(el("p", { class: "mx-empty" }, "Nothing to show yet. Go back and sort a folder first.")); return; }
-  indexes();
+  indexes(); D._events = null;
   $("source").textContent = (D.source.source || "").replace(/^\/Users\/[^/]+/, "~") + (DEMO ? " · demo: drawn pictures, made-up people" : "");
   kpis(); tabs(); render();
 }
@@ -105,12 +105,14 @@ const TABS = [
   ["all", "Everything", () => D.files.length], ["people", "People", () => D.people.length], ["faces", "Faces", () => D.faces.length],
   ["shots", "Screenshots", () => D.files.filter(f => f.screenshot).length], ["money", "Money", () => D.files.filter(f => f.amount && !f.duplicate_of).length],
   ["family", "Family", () => D.people.filter(p => p.family).length], ["timeline", "Timeline", () => D.people.filter(p => p.name).length],
+  ["events", "Events", () => events().length], ["search", "Face search", () => ""],
+  ["requests", "Requests", () => (D.requests || []).filter(r => r.status === "pending").length + (D.alerts || []).filter(a => !a.seen).length || ""],
   ["docs", "Documents", () => D.files.filter(f => f.kind === "doc").length], ["videos", "Videos", () => D.files.filter(f => f.kind === "video").length],
 ];
 function tabs() {
   $("tabs").replaceChildren(...TABS.map(([k, label, n]) => el("button", { role: "tab", "aria-selected": ui.tab === k, onclick: () => {
     Object.assign(ui, { tab: k, sort: null, desc: false, shown: 200, q: "" }); remember(); tabs(); render();
-  } }, label, el("em", {}, fmt(n())))));
+  } }, label, n() === "" ? null : el("em", {}, fmt(n())))));
 }
 
 /* ---------- toolbar ---------- */
@@ -179,7 +181,7 @@ const T = {  // reusable columns
 let renderBody = () => {};
 function render() {
   $("view").replaceChildren();
-  ({ all: viewAll, family: viewFamily, timeline: viewTimeline, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
+  ({ all: viewAll, family: viewFamily, timeline: viewTimeline, events: viewEvents, search: viewFaceSearch, requests: viewRequests, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
 }
 function simple(filter, cols, extra = [], note = null) {
   toolbar(extra, note);
@@ -632,4 +634,212 @@ function viewTimeline() {
       .bindPopup(`<img src="${thumb(f)}" width="120" alt=""><br><b>${niceDate(f.taken)}</b>${f.camera ? "<br>" + f.camera : ""}`).addTo(map));
     map.fitBounds(L.latLngBounds(pts).pad(0.3));
   }).catch(() => mapBox.replaceChildren(el("p", { class: "hint" }, "The map needs an internet connection. Places: " + geo.map(f => `${f.lat.toFixed(3)}, ${f.lon.toFixed(3)}`).slice(0, 10).join(" · "))));
+}
+
+/* ---------- Face search: find every photo of a face (compares face codes) ---------- */
+function viewFaceSearch() {
+  toolbar([], el("span", { class: "meta" }, "The picture you search with stays on this computer and isn't saved."));
+  $("toolbar").querySelector("input").hidden = true;
+  const input = el("input", { type: "file", accept: "image/*", hidden: true, onchange: e => e.target.files[0] && readFile(e.target.files[0]) });
+  const drop = el("label", { class: "dropzone", tabindex: 0 },
+    el("span", { class: "dz-ico" }, "🔍"), el("b", {}, "Drop a photo or selfie here"),
+    el("span", { class: "hint" }, "or click to choose one. The biggest face in it is used."), input);
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) readFile(f); };
+  const out = el("div", { class: "fs-out" });
+  const samples = DEMO ? el("div", { class: "card-box" }, el("h3", {}, "Try it with a sample face"),
+    el("p", { class: "hint" }, "In the demo the matching is simulated. In the app, any photo or selfie works."),
+    el("div", { class: "pchips" }, D.people.filter(p => p.name).map(p => el("button", { class: "chip-btn", onclick: () => demoSearch(p) },
+      el("img", { src: faceImg(p.cover), alt: "" }), p.display)))) : null;
+  $("view").replaceChildren(el("div", { class: "fs-grid" }, drop, samples), out);
+  function readFile(file) {
+    if (DEMO) return toast("In the demo, pick a sample face below.");
+    const r = new FileReader();
+    r.onload = () => run(r.result);
+    r.readAsDataURL(file);
+  }
+  async function run(dataUrl) {
+    out.replaceChildren(el("div", { class: "card-box loading" }, el("span", { class: "spinner" }), "Looking at every face in the library…"));
+    let res;
+    try { res = await api("/api/face-search", { image: dataUrl }); } catch (e) { out.replaceChildren(); return; }
+    show(res);
+  }
+  function demoSearch(p) {
+    const others = D.people.filter(o => o.person_id !== p.person_id && o.faces > 2).slice(0, 2);
+    show({ query: faceImg(p.cover), faces_in_picture: 1, estimate: { age: p.age_est ? `~${p.age_est}` : null, gender: p.gender_est, emotion: p.emotion_usual },
+      people: [{ person_id: p.person_id, score: 0.93, level: "strong", face_ids: D.faces.filter(f => f.person_id === p.person_id).map(f => f.face_id) },
+        ...others.map((o, i) => ({ person_id: o.person_id, score: 0.47 - i * 0.03, level: "possible", face_ids: [] }))] });
+  }
+  function show(res) {
+    const card = r => {
+      const p = byPerson[r.person_id] || { display: `Person ${r.person_id}` };
+      return el("div", { class: "match " + r.level, onclick: () => { Object.assign(ui, { tab: "all", who: [r.person_id], mood: "", tag: "", q: "" }); remember(); tabs(); render(); scrollTo(0, 0); } },
+        el("img", { src: p.cover ? faceImg(p.cover) : "", alt: "" }),
+        el("div", { class: "m-txt" }, el("b", {}, p.display), el("span", { class: "pid" }, pid(r.person_id)),
+          el("span", { class: "hint" }, `${fmt((p.photos || 0) + (p.videos || 0))} photos and videos`)),
+        el("div", { class: "m-score" }, el("b", {}, `${Math.round(r.score * 100)}%`), el("span", { class: "meter" }, el("i", { style: `width:${Math.round(r.score * 100)}%` })),
+          el("small", {}, r.level === "strong" ? "same person" : "maybe")));
+    };
+    const strong = res.people.filter(r => r.level === "strong"), maybe = res.people.filter(r => r.level !== "strong");
+    const e = res.estimate || {};
+    out.replaceChildren(el("div", { class: "card-box fs-result" },
+      el("div", { class: "fs-query" }, el("img", { src: res.query, alt: "The face searched for" }),
+        el("div", {}, el("b", {}, "The face we searched for"),
+          el("span", { class: "hint" }, [e.age && `age ${e.age}`, e.gender, e.emotion].filter(Boolean).join(" · ") + " (est.)",
+            res.faces_in_picture > 1 ? ` · ${res.faces_in_picture} faces in the picture, the biggest was used` : ""))),
+      el("h3", {}, strong.length ? "Found" : "Not found in the library"),
+      strong.length ? el("div", { class: "matches" }, strong.map(card)) : el("p", { class: "hint" }, "No one in the library looks like this person. They may be in photos where their face is too small or turned away."),
+      maybe.length ? el("h3", {}, "Possible matches") : null, maybe.length ? el("div", { class: "matches" }, maybe.map(card)) : null,
+      el("p", { class: "hint" }, "Click a person to see all their photos. Face matching can be wrong for twins, siblings and children.")));
+  }
+}
+
+/* ---------- Events: who came, how they felt, ages and genders (all estimated) ---------- */
+const ageBand = a => a == null ? null : a < 13 ? "Children (0-12)" : a < 20 ? "Teens (13-19)" : a < 36 ? "Young adults (20-35)" : a < 56 ? "Adults (36-55)" : "Seniors (56+)";
+const BANDS = ["Children (0-12)", "Teens (13-19)", "Young adults (20-35)", "Adults (36-55)", "Seniors (56+)"];
+function events() {
+  if (D._events) return D._events;
+  const fs = D.files.filter(f => f.taken && (f.kind === "photo" || f.kind === "video") && !f.screenshot && !f.duplicate_of)
+    .sort((a, b) => a.taken.localeCompare(b.taken));
+  const t = f => new Date(f.taken.replace(" ", "T")).getTime();
+  const groups = [];
+  let cur = [];
+  fs.forEach(f => { if (cur.length && t(f) - t(cur[cur.length - 1]) > 3 * 3600e3) { groups.push(cur); cur = []; } cur.push(f); });
+  if (cur.length) groups.push(cur);
+  D._events = groups.filter(g => g.length >= 6 && new Set(g.flatMap(f => f.people_ids)).size >= 3).map((g, i) => {
+    const tags = {};
+    g.forEach(f => (f.labels || []).forEach(x => tags[x] = (tags[x] || 0) + 1));
+    const ORDER = ["event", "family", "trip", "beach", "mountains", "landmark", "dine-out", "city", "home"];  // the first one in a fifth of the photos names it
+    const kind = ORDER.find(k => (tags[k] || 0) >= g.length / 5) || "";
+    const label = { "dine-out": "Meal out", trip: "Trip", family: "Family get-together", event: "Party or function", beach: "Beach day", mountains: "Mountains", city: "Day out", home: "At home", landmark: "Sightseeing" }[kind] || "Get-together";
+    return { id: i, files: g, start: g[0].taken, end: g[g.length - 1].taken, label, title: D.event_names?.[g[0].taken] || label };
+  }).reverse();
+  return D._events;
+}
+function eventStats(ev) {
+  const faces = ev.files.flatMap(f => f.face_ids.map(i => byFace[i]).filter(Boolean));
+  const guests = {};
+  faces.forEach(x => {
+    const g = guests[x.person_id] = guests[x.person_id] || { id: x.person_id, faces: [], files: new Set(), first: null, last: null };
+    g.faces.push(x);
+    const f = byFile[x.file_ids[0]];
+    g.files.add(f.id);
+    g.first = !g.first || f.taken < g.first ? f.taken : g.first;
+    g.last = !g.last || f.taken > g.last ? f.taken : g.last;
+  });
+  const list = Object.values(guests).map(g => {
+    const moods = {}; g.faces.forEach(x => x.emotion && (moods[moodKey(x.emotion)] = (moods[moodKey(x.emotion)] || 0) + 1));
+    const ages = g.faces.map(x => x.age_years).filter(a => a != null), gens = g.faces.map(x => x.gender).filter(Boolean);
+    const p = byPerson[g.id] || {};
+    return { ...g, p, moods, usual: Object.entries(moods).sort((a, b) => b[1] - a[1])[0]?.[0] || "",
+      age: ages.length ? Math.round(ages.reduce((a, b) => a + b) / ages.length) : p.age_est,
+      gender: gens.length ? (gens.filter(x => x === "female").length > gens.length / 2 ? "female" : "male") : p.gender_est };
+  }).sort((a, b) => b.files.size - a.files.size);
+  const moods = {}; faces.forEach(x => x.emotion && (moods[moodKey(x.emotion)] = (moods[moodKey(x.emotion)] || 0) + 1));
+  const bands = {}; list.forEach(g => { const b = ageBand(g.age); if (b) bands[b] = (bands[b] || 0) + 1; });
+  const gender = { female: list.filter(g => g.gender === "female").length, male: list.filter(g => g.gender === "male").length };
+  return { list, moods, bands, gender, faces };
+}
+function stackBar(parts, series) {  // one part-to-whole bar with labels
+  const total = Object.values(parts).reduce((a, b) => a + b, 0) || 1;
+  return el("div", { class: "stack" }, el("div", { class: "stack-bar" }, series.filter(s => parts[s[0]]).map(s => {
+    const seg = el("i", { style: `flex:${parts[s[0]]};background:var(--${s[2]})` });
+    seg.onmousemove = e => tooltip(e, `${s[1]} <b>${parts[s[0]]}</b> (${Math.round(parts[s[0]] / total * 100)}%)`);
+    seg.onmouseleave = e => tooltip(e, null);
+    return seg;
+  })), el("div", { class: "legend" }, series.filter(s => parts[s[0]]).map(s => el("span", {}, el("i", { style: `background:var(--${s[2]})` }), `${s[1]} ${Math.round(parts[s[0]] / total * 100)}%`))));
+}
+function viewEvents() {
+  const evs = events();
+  toolbar([], el("span", { class: "meta" }, "Photos taken close together (no gap over 3 hours) with at least 3 people. Moods, ages and genders are estimates."));
+  $("toolbar").querySelector("input").hidden = true;
+  const moodSeries = MOODS.map(([k, e], i) => [k, `${e} ${k}`, `series-${i + 1}`]);
+  renderBody = () => {
+    if (ui.ev == null || !evs[ui.ev]) {
+      if (!evs.length) return $("view").replaceChildren(el("p", { class: "mx-empty" }, "No events found yet: an event needs at least 6 photos taken close together with 3 or more people."));
+      return $("view").replaceChildren(el("div", { class: "events" }, evs.map((ev, i) => {
+        const st = eventStats(ev);
+        const top = Object.entries(st.moods).sort((a, b) => b[1] - a[1])[0];
+        return el("button", { class: "event-card", onclick: () => { ui.ev = i; renderBody(); scrollTo(0, 0); } },
+          el("div", { class: "mosaic" }, ev.files.filter(f => f.face_ids.length).slice(0, 4).map(f => el("img", { src: thumb(f), alt: "", loading: "lazy" }))),
+          el("div", { class: "ev-txt" }, el("b", {}, ev.title), el("span", { class: "hint" }, niceDate(ev.start)),
+            el("span", { class: "ev-meta" }, `${fmt(ev.files.length)} photos · ${fmt(st.list.length)} people`, top ? ` · mostly ${MOODS.find(m => m[0] === top[0])[1]} ${top[0]}` : "")));
+      })));
+    }
+    const ev = evs[ui.ev], st = eventStats(ev);
+    const known = st.list.filter(g => g.p.name).length;
+    const hours = (new Date(ev.end.replace(" ", "T")) - new Date(ev.start.replace(" ", "T"))) / 3600e3;
+    const avgAge = st.list.filter(g => g.age != null);
+    const csv = () => {
+      const rows = [["Person ID", "Name", "Photos", "First seen", "Last seen", "Usual mood (est.)", ...MOODS.map(m => m[0]), "Age (est.)", "Gender (est.)"],
+        ...st.list.map(g => [pid(g.id), g.p.display || "", g.files.size, g.first, g.last, g.usual, ...MOODS.map(m => g.moods[m[0]] || 0), g.age ?? "", g.gender || ""])];
+      const a = el("a", { href: URL.createObjectURL(new Blob([rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" })),
+        download: `${ev.title} ${ev.start.slice(0, 10)} guests.csv` });
+      a.click();
+    };
+    const stat = (h, v, s) => el("div", { class: "mx-kpi" }, el("h3", {}, h), el("b", {}, v), el("small", {}, s || " "));
+    $("view").replaceChildren(
+      el("div", { class: "toolbar" }, el("button", { class: "mx-btn ghost small", onclick: () => { ui.ev = null; renderBody(); } }, icon("left"), "Events"),
+        el("h3", { class: "crumb" }, `${ev.title} · ${niceDate(ev.start)}`), el("span", { class: "spacer" }),
+        el("button", { class: "mx-btn small", onclick: csv }, icon("download"), "Guest list (CSV)")),
+      el("section", { class: "mx-kpis", style: "--n:5" },
+        stat("Photos", fmt(ev.files.length), `${ev.start.slice(11, 16)}–${ev.end.slice(11, 16)}${hours >= 1 ? ` · ${Math.round(hours)} h` : ""}`),
+        stat("People", fmt(st.list.length), `${known} named · ${st.list.length - known} not named`),
+        stat("Mostly", (() => { const t = Object.entries(st.moods).sort((a, b) => b[1] - a[1])[0]; return t ? `${MOODS.find(m => m[0] === t[0])[1]} ${t[0]}` : "—"; })(), "mood (est.)"),
+        stat("Average age", avgAge.length ? `~${Math.round(avgAge.reduce((a, g) => a + g.age, 0) / avgAge.length)}` : "—", "estimated"),
+        stat("Women · men", `${st.gender.female} · ${st.gender.male}`, "estimated")),
+      el("div", { class: "tl-grid three" },
+        el("div", { class: "card-box" }, el("h3", {}, "Mood of everyone (est.)"), Object.keys(st.moods).length ? stackBar(st.moods, moodSeries) : el("p", { class: "hint" }, "Faces too small to read a mood.")),
+        el("div", { class: "card-box" }, el("h3", {}, "Ages (est.)"), el("div", { class: "hbars" }, BANDS.filter(b => st.bands[b]).map(b => el("div", { class: "hbar" }, el("span", {}, b), el("b", {}, fmt(st.bands[b])),
+          el("i", { style: `width:${st.bands[b] / Math.max(...Object.values(st.bands)) * 100}%` }))))),
+        el("div", { class: "card-box" }, el("h3", {}, "Women and men (est.)"), stackBar(st.gender, [["female", "Women", "series-5"], ["male", "Men", "series-1"]]))),
+      el("div", { class: "card-box" }, el("h3", {}, "Who was there"),
+        el("div", { class: "tbl-wrap flat" }, el("table", { class: "dtable" },
+          el("thead", {}, el("tr", {}, ["", "Person", "Photos", "First seen", "Last seen", "Mood (est.)", "Usual", "Age (est.)", "Gender (est.)"].map(h => el("th", {}, h)))),
+          el("tbody", {}, st.list.map(g => el("tr", { onclick: () => byPerson[g.id] && personDrawer(byPerson[g.id]) },
+            el("td", {}, el("img", { class: "face", src: g.p.cover ? faceImg(g.p.cover) : faceImg(g.faces[0].face_id), alt: "" })),
+            el("td", {}, el("b", {}, g.p.display || `Person ${g.id}`), " ", el("span", { class: "pid" }, pid(g.id))),
+            el("td", { class: "num" }, fmt(g.files.size)), el("td", {}, g.first.slice(11, 16)), el("td", {}, g.last.slice(11, 16)),
+            el("td", {}, Object.keys(g.moods).length ? el("div", { class: "mini-stack" }, MOODS.filter(m => g.moods[m[0]]).map((m, i) => el("i", { title: `${m[0]} ${g.moods[m[0]]}`, style: `flex:${g.moods[m[0]]};background:var(--series-${MOODS.indexOf(m) + 1})` }))) : "—"),
+            el("td", {}, g.usual ? `${MOODS.find(m => m[0] === g.usual)[1]} ${g.usual}` : "—"),
+            el("td", { class: "num" }, g.age != null ? `~${g.age}` : "—"), el("td", {}, g.gender || "—"))))))),
+      el("div", { class: "card-box" }, el("h3", {}, "Photos"), el("div", { class: "photos" }, ev.files.map(f => el("img", { src: thumb(f), alt: f.name, loading: "lazy", onclick: () => viewer(f) })))));
+    paintIcons($("view"));
+  };
+  renderBody();
+}
+
+/* ---------- Requests: sign-ups from the sharing app waiting for you, and alerts ---------- */
+function viewRequests() {
+  toolbar([], el("span", { class: "meta" }, "People who signed up in the sharing app with their mobile number and a live selfie."));
+  $("toolbar").querySelector("input").hidden = true;
+  const reqs = D.requests || [], alerts = D.alerts || [];
+  const label = { pending: ["Waiting for you", "warn"], conflict: ["Blocked: face belongs to another number", "bad"], approved: ["Approved", "ok"],
+    denied: ["Denied", ""], none: ["Not found in any photo", ""] };
+  const decide = async (r, action, person_id) => {
+    try { await api("/api/enrollment", { id: r.id, action, person_id }); } catch (e) { return; }
+    toast(action === "approve" ? "Approved. They can now see their photos." : "Denied."); await load();
+  };
+  $("view").replaceChildren(
+    alerts.length ? el("div", { class: "card-box" }, el("h3", {}, "Alerts"), alerts.map(a => el("div", { class: "alert " + (a.kind === "impersonation" ? "bad" : "warn") },
+      el("span", { class: "a-ico" }, a.kind === "impersonation" ? "⚠️" : "🗑️"),
+      el("div", {}, el("b", {}, a.kind === "impersonation" ? "Someone tried to use another person's face" : "Asked to be deleted"),
+        el("p", { class: "hint" }, a.detail), el("small", { class: "hint" }, a.at))))) : null,
+    el("div", { class: "card-box" }, el("h3", {}, "Sign-up requests"),
+      reqs.length ? reqs.map(r => {
+        const p = byPerson[r.person_id];
+        const [txt, cls] = label[r.status] || [r.status, ""];
+        const pick = el("select", { class: "mx-select small", "aria-label": "Who is this?" }, el("option", { value: "" }, "Who is this?"),
+          D.people.filter(q => q.name || q.photos + q.videos > 1).map(q => el("option", { value: q.person_id, selected: q.person_id === r.person_id }, `${q.display} · ${pid(q.person_id)}`)));
+        return el("div", { class: "req" },
+          el("div", { class: "req-faces" }, el("figure", {}, el("img", { src: r.selfie || "", alt: "" }), el("figcaption", {}, "Live selfie")),
+            el("span", { class: "vs" }, r.score ? `${Math.round(r.score * 100)}%` : "?"),
+            el("figure", {}, el("img", { src: p && p.cover ? faceImg(p.cover) : "", alt: "" }), el("figcaption", {}, p ? p.display : "No match"))),
+          el("div", { class: "req-txt" }, el("b", {}, r.mobile), el("span", { class: "status " + cls }, txt), el("small", { class: "hint" }, r.at)),
+          r.status === "pending" ? el("div", { class: "req-acts" }, pick,
+            el("button", { class: "mx-btn small solid", onclick: () => decide(r, "approve", pick.value || r.person_id) }, "Approve"),
+            el("button", { class: "mx-btn small", onclick: () => decide(r, "deny") }, "Deny")) : null);
+      }) : el("p", { class: "hint" }, "No sign-ups yet. People sign up at /share.html with their mobile number and a live selfie.")),
+    el("p", { class: "hint" }, "Approve only people you know. A face match is not proof of identity: twins, siblings and printed photos can fool it."));
 }

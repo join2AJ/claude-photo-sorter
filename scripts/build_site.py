@@ -20,7 +20,7 @@ for f in os.listdir(DASH):
     if f.endswith((".html", ".css", ".js")):
         shutil.copy(os.path.join(DASH, f), SITE)
 shutil.copytree(os.path.join(DASH, "demo"), os.path.join(SITE, "demo"))
-for page in ("index.html", "details.html"):
+for page in ("index.html", "details.html", "share.html"):
     p = os.path.join(SITE, page)
     html = open(p).read()
     i = html.index("<script src=")

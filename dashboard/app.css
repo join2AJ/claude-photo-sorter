@@ -201,3 +201,5 @@ input, textarea, select { font: 13px var(--font); }
   .topbar { gap: 6px; padding: 0 12px; }
   .topbar .lbl { display: none; }
 }
+.phone-only { display: none; }
+@media (max-width: 640px) { .topbar .phone-only { display: inline; } }

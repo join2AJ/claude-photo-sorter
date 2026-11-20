@@ -40,6 +40,14 @@ CREATE INDEX IF NOT EXISTS faces_sha ON faces(sha256);
 CREATE INDEX IF NOT EXISTS faces_person ON faces(person_id);
 CREATE TABLE IF NOT EXISTS vault_overrides (
   sha256 TEXT PRIMARY KEY, person_id INT, folder TEXT, not_family INT DEFAULT 0, at TEXT);
+CREATE TABLE IF NOT EXISTS enrollments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, mobile TEXT, name TEXT, embedding BLOB, selfie BLOB, status TEXT,
+  person_id INT, score REAL, at TEXT, decided_at TEXT);
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, person_id INT, mobile TEXT, detail TEXT, at TEXT, seen INT DEFAULT 0);
+CREATE TABLE IF NOT EXISTS otps (mobile TEXT PRIMARY KEY, code_hash TEXT, expires REAL, tries INT DEFAULT 0, sent REAL);
+CREATE TABLE IF NOT EXISTS guest_sessions (
+  token_hash TEXT PRIMARY KEY, mobile TEXT, stage TEXT, enrollment_id INT, person_id INT, created REAL, expires REAL);
 CREATE TABLE IF NOT EXISTS consent_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INT, action TEXT, detail TEXT, at TEXT);
 """

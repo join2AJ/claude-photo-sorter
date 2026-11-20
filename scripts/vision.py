@@ -113,6 +113,17 @@ def faces(img, min_size=36):
     return out
 
 
+def detect_boxes(img, min_size=8, score=0.6):
+    """Just the face boxes, small ones too (for blurring background faces). No fingerprints."""
+    H, W = img.shape[:2]
+    det = _model("yunet.onnx")
+    det.setInputSize((W, H))
+    det.setScoreThreshold(score)
+    _, found = det.detect(img)
+    det.setScoreThreshold(0.75)
+    return [[int(v) for v in f[:4]] for f in (found if found is not None else []) if min(f[2], f[3]) >= min_size]
+
+
 def face_thumb(img, box, size=160):
     c = _crop(img, box, 0.25)
     h, w = c.shape[:2]

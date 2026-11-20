@@ -3,7 +3,7 @@
   python scripts/excel.py                     -> "<sorted folder>/Library details.xlsx" (or work/ before sorting)
   python scripts/excel.py "/path/out.xlsx"
 
-Sheets: Summary, All files, By person, Family documents, People, Faces, Screenshots, Money, Documents, Videos.
+Sheets: Summary, All files, By person, Family documents, Events, People, Faces, Screenshots, Money, Documents, Videos.
 Faces and people get their picture in the sheet. Ages, genders and emotions are estimates.
 """
 import os, sys
@@ -157,6 +157,44 @@ def build(out, L=None, base=DATA):
             link(ws.cell(n, 12), f["copy"])
             link(ws.cell(n, 13), f["path"])
 
+    # ---- Events: photos close together (gap under 3 hours) with 3+ people; one row per guest
+    dated = sorted((f for f in files if f["taken"] and f["kind"] in ("photo", "video") and not f["screenshot"] and not f["duplicate_of"]),
+                   key=lambda f: f["taken"])
+    groups, cur = [], []
+    ts = lambda f: datetime.strptime(f["taken"][:16], "%Y-%m-%d %H:%M").timestamp()
+    for f in dated:
+        if cur and ts(f) - ts(cur[-1]) > 3 * 3600:
+            groups.append(cur)
+            cur = []
+        cur.append(f)
+    if cur:
+        groups.append(cur)
+    groups = [g for g in groups if len(g) >= 6 and len({p for f in g for p in f["people_ids"]}) >= 3]
+    if groups:
+        ws = wb.create_sheet("Events")
+        hdr = ["Face", "Event", "Date", "From", "To", "Photos in event", "Person ID", "Name", "Photos with them", "First seen", "Last seen",
+               "Usual mood (est.)", "Moods seen (est.)", "Age (est.)", "Gender (est.)"]
+        rows, pics = [], []
+        for g in reversed(groups):
+            title = f"{g[0]['taken'][:10]} · {len(g)} photos"
+            guests = {}
+            for f in g:
+                for x in (face_by_id[i] for i in f["face_ids"] if i in face_by_id):
+                    guests.setdefault(x["person_id"], []).append((f, x))
+            for pid_, seen in sorted(guests.items(), key=lambda kv: -len({f["id"] for f, _ in kv[1]})):
+                emos = Counter(x["emotion"] for _, x in seen if x["emotion"])
+                ages = [x["age_years"] for _, x in seen if x["age_years"] is not None]
+                gens = Counter(x["gender"] for _, x in seen if x["gender"])
+                times = sorted(f["taken"] for f, _ in seen)
+                p = people.get(pid_, {})
+                rows.append(["", title, g[0]["taken"][:10], g[0]["taken"][11:16], g[-1]["taken"][11:16], len(g), pid(pid_),
+                             p.get("display", ""), len({f["id"] for f, _ in seen}), times[0][11:16], times[-1][11:16],
+                             emos.most_common(1)[0][0] if emos else "", ", ".join(f"{k} {v}" for k, v in emos.most_common()),
+                             round(sum(ages) / len(ages)) if ages else None, gens.most_common(1)[0][0] if gens else ""])
+                pics.append(os.path.join(base, "faces", f"{seen[0][1]['face_id']}.jpg"))
+        table(ws, "Events", hdr, rows, [9, 22, 12, 8, 8, 10, 10, 18, 10, 10, 10, 14, 30, 10, 12], style="TableStyleMedium12",
+              pics=pics, pic_col=1, row_h=48)
+
     # ---- People
     ws = wb.create_sheet("People")
     plist = sorted(people.values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))
@@ -298,7 +336,7 @@ def build(out, L=None, base=DATA):
 
     for s in wb.worksheets[1:]:
         s.sheet_properties.tabColor = {"All files": "1F2937", "People": ACCENT, "Faces": "B45309", "Screenshots": "2563EB",
-                                       "Money": "15803D", "Documents": "7C3AED", "Videos": "0E7490", "By person": "BE185D", "Family documents": "A16207"}.get(s.title)
+                                       "Money": "15803D", "Documents": "7C3AED", "Videos": "0E7490", "By person": "BE185D", "Family documents": "A16207", "Events": "0F766E"}.get(s.title)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     wb.save(out)
     return out

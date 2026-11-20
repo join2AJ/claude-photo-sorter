@@ -14,6 +14,9 @@ Point it at your camera roll, a zip file or a share link. It looks inside every 
 - **Family document vault**: mark people as family and each gets a full folder tree, filled with their papers and photos:
   `1. Documents` (Educational: Skill/Study Certificates, Resume by focus area · Financial: Expenses, Income Tax · Legal: IDs, DNA, Property: Rent, Land/Building, Vehicle: Bike/Car · Cases · Company Ids), `2. Photos` (Profile, Inspirations, Trip, Event), `3. Medical` (Diagnostics, Prescriptions, Vaccinations, History, Medical/Life Insurance: Policy Pack, Premium receipts, Annual statement · Wellness), `4. Company/<Employer>` (Pre-Joining, Post-Joining, Farewell, Course or Travel) and `5. Miscellaneous`. Every folder shows its size and newest date ("Modified 9 Jan 2021"). The folders are in `scripts/vault.py`.
 - **Tags on every photo**: dine-out, food, sky, sunset, night, greenery, mountains, beach, trip, city, dog, selfie, couple, group, family, people's names, moods, morning/evening, weekend. Click a tag to filter.
+- **Search by face**: drop in any photo or selfie and see every photo that person is in. Each face is stored as a face code (128 numbers), so searching is just comparing codes.
+- **Event reports**: photos taken close together become events (a wedding, a birthday, an office party): who was there, how many photos each, first and last seen, everyone's mood, ages and women/men (all estimated). Guest list as CSV, and an Events sheet in Excel.
+- **Sharing app** (`/share.html`, prototype): people sign in with their mobile number (a 6-digit code) and a live selfie where they turn their head. They see only photos they're in. Another person's face is shown only if that person agreed (and didn't hide it from them); everyone else, including people who never signed up and tiny background faces, is blurred on your computer before the photo is sent. If someone signs up with a face that belongs to another registered number, they're blocked and you get an alert. New people are confirmed by you on the **Requests** tab.
 - **Timeline per person**: a map of where their photos were taken, which phones took them, photos per month and their mood over time (estimated).
 - **Finds duplicates**: identical copies, burst shots and re-saved screenshots go to a `_Review` folder.
 - **Excel file** with Summary, All files, People (with face pictures), Faces, Screenshots, Money, Documents and Videos sheets.
@@ -116,9 +119,15 @@ Faces, text, the Details page and the Excel file always come from your computer,
 - `Library details.xlsx` contains personal information. Keep it private.
 - Face data counts as sensitive personal data under privacy laws (India's DPDP Act, GDPR). Ask people before naming them or sharing their photos. Consent changes are logged with the date.
 
-## Coming next: sharing app
+## The sharing app today, and what's needed to put it online
 
-People log in with their mobile number and see only photos they're in. In a group photo, a person's face is shown only if they said yes; otherwise it's blurred. People who haven't registered stay blurred. Each person can choose who sees their face. The data for this (mobile numbers, consent, share/hide lists, consent log) is already recorded on the Details page.
+It works end to end on your computer, in **test mode**: no SMS is sent, the code is shown on screen. The app's server only listens to your own computer, so other people can't reach it yet. To open it to others:
+
+1. A server (or a secure tunnel to your computer) with HTTPS, so phones can reach it and use their camera.
+2. An SMS service for the codes (MSG91, Twilio, Firebase...). Set `SMS_PROVIDER` and connect it in `scripts/sharing.py` (`send_code`). This costs a little per message.
+3. A stronger liveness check than the basic head turn (it stops a still photo, not a video or a mask), and a privacy policy reviewed by a lawyer.
+
+Face matching can be wrong (twins, siblings, children): access always needs the mobile code plus your approval for new people, never a face alone.
 
 ## Public demo website (Netlify)
 
