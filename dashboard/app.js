@@ -40,6 +40,7 @@ const ICONS = {
   moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   arrow: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  table: '<path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>',
 };
 const svg = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
 const icon = n => { const s = el("span", { "data-icon": n }); s.innerHTML = svg(n); return s; };
@@ -62,10 +63,10 @@ $("theme").onclick = () => setTheme(document.documentElement.dataset.theme === "
 let S = {};                                 // server state
 let mode = "loading";                       // setup | running | done
 let cats = [], catBy = {}, items = [], byId = {}, dupeIds = new Set(), labels = {};
-const pick = { source: null, dest: null, peek: null, advanced: false, labeler: "claude", sample: false, typing: null };
+const pick = { source: null, dest: null, peek: null, advanced: false, labeler: "local", sample: false, typing: null };
 let tiles = [], run = "idle", order = [], released = 0, landed = 0, t0 = 0;
 const queue = [], flown = new Set();
-const stats = { photos: 0, videos: 0, dupes: 0, saved: 0 };
+const stats = { photos: 0, videos: 0, docs: 0, dupes: 0, saved: 0 };
 
 async function api(path, body) {
   if (DEMO) { toast("This is the demo. Run ./start.sh to sort your own photos."); throw new Error("demo"); }
@@ -109,7 +110,8 @@ function setHeader() {
   $("total").textContent = fmt(items.length);
   $("btnOpen").hidden = !(mode === "done" && S.sorted);
   $("btnNew").hidden = mode !== "done";
-  $("k-checked-s").textContent = items.length && mode !== "setup" ? size(items.reduce((s, r) => s + r.bytes, 0)) + " in total" : "photos & videos";
+  $("go").querySelector("span:last-child").textContent = mode === "done" ? "Replay" : "Start sorting";
+  $("k-checked-s").textContent = items.length && mode !== "setup" ? size(items.reduce((s, r) => s + r.bytes, 0)) + " in total" : "photos, videos & docs";
   document.body.dataset.mode = mode;
 }
 
@@ -124,8 +126,8 @@ function card(c) {
 }
 function buildCards() {
   $("photos").replaceChildren(...cats.filter(c => c.kind === "photo").map(card));
-  $("videos").replaceChildren(...cats.filter(c => c.kind === "video").map(card), card(catBy._dupes));
-  Object.assign(stats, { photos: 0, videos: 0, dupes: 0, saved: 0 });
+  $("videos").replaceChildren(...cats.filter(c => c.kind === "video").map(card), ...cats.filter(c => c.kind === "doc").map(card), card(catBy._dupes));
+  Object.assign(stats, { photos: 0, videos: 0, docs: 0, dupes: 0, saved: 0 });
   released = landed = 0;
   flown.clear();
 }
@@ -201,7 +203,7 @@ function land(it, c, live) {
     c.el.classList.add("hit"); clearTimeout(c.hitT); c.hitT = setTimeout(() => c.el.classList.remove("hit"), 260);
   }
   c.badge.textContent = fmt(c.landed.length); c.badge.classList.add("on");
-  if (it.dupe) { stats.dupes++; stats.saved += it.bytes; } else if (it.kind === "video") stats.videos++; else stats.photos++;
+  if (it.dupe) { stats.dupes++; stats.saved += it.bytes; } else if (it.kind === "video") stats.videos++; else if (it.kind === "doc") stats.docs++; else stats.photos++;
   landed++;
   if (live && run === "replay" && landed === items.length) celebrate();
   if (live && run === "live" && finishing && landed >= items.length) celebrate();
@@ -218,6 +220,7 @@ function fillStatic() {  // results without animation
 function showDone(celebrateNow) {
   document.body.classList.add("is-done");
   $("bigF").textContent = `${cats.length} folders`;
+  $("bigF").nextSibling && ($("bigF").nextSibling.textContent = S.job && S.job.labeler && S.job.labeler !== "local" ? " with one prompt" : " on this computer");
   $("chipD").textContent = `🗂️ ${fmt(stats.dupes)} duplicates`;
   $("chipS").textContent = `💾 ${size(stats.saved)} freed`;
   if (celebrateNow) { countUp($("bigN"), items.length, 900); confetti(); } else $("bigN").textContent = fmt(items.length);
@@ -230,7 +233,7 @@ function replay() {
   document.body.classList.remove("is-done");
   buildCards(); sphereFromItems();
   run = "replay"; t0 = performance.now(); released = 0;
-  setPill("busy", "Claude is looking at every photo & video");
+  setPill("busy", "Looking at every photo, video & document");
 }
 
 /* ---------- KPIs and the frame loop ---------- */
@@ -244,7 +247,8 @@ function updateStats() {
   $("k-dupes").textContent = fmt(stats.dupes);
   $("k-saved").textContent = size(stats.saved);
   $("pcount").textContent = fmt(stats.photos);
-  $("vcount").textContent = fmt(stats.videos);
+  $("vcount").textContent = fmt(stats.videos + stats.docs);
+  $("k-docs").textContent = fmt(stats.docs);
   $("bar").style.width = (mode === "running" ? overallProgress() * 100 : items.length ? landed / items.length * 100 : 0) + "%";
 }
 let last = performance.now();
@@ -287,17 +291,24 @@ function confetti() {
 
 /* ---------- time estimate ----------
    Measured on a 2020 MacBook with 1,136 files (10.7 GB): scan 125 s, duplicates 6 s,
-   Claude labels about 12 s per 90 files with 4 at a time, building folders 20 s. */
+   Claude labels about 12 s per 90 files with 4 at a time, building folders 20 s.
+   Looking inside (faces, text, things) about 0.35 s per file with 4 workers; local sorting is instant. */
 function phaseEstimates(files, bytes, scan = true) {
   const batches = Math.ceil(Math.ceil(files / 30) / 3);
+  const labeler = (S.job && S.job.labeler) || pick.labeler;
   return {
+    import: 5,
     scan: scan ? 4 + files * 0.025 + bytes / 1e9 * 9 : 0,
     dupes: 2 + Math.pow(files / 1000, 2) * 4,
-    label: 12 + files * 0.012 + Math.ceil(batches / 4) * 14,
+    analyse: 5 + files * 0.35,
+    label: labeler === "local" ? 2 + files * 0.001 : 12 + files * 0.012 + Math.ceil(batches / 4) * 14,
     apply: 2 + files * 0.018,
+    excel: 3 + files * 0.01,
   };
 }
-const NAMES = { scan: "Looking at every file", dupes: "Finding duplicates", label: "Claude is sorting your photos", apply: "Building your folders" };
+const NAMES = { import: "Bringing your files in", scan: "Looking at every file", dupes: "Finding duplicates",
+  analyse: "Finding faces, text and what's in each file", label: "Choosing a folder for each file", apply: "Building your folders",
+  excel: "Writing the Excel file" };
 function overallProgress() {
   const j = S.job || {}; if (!j.phases || !j.phases.length) return 0;
   const est = runEstimates(), total = j.phases.reduce((s, p) => s + est[p], 0) || 1;
@@ -349,17 +360,20 @@ function setupCard() {
   if (!pick.source) {
     box.append(el("div", { class: "q" }, el("span", { class: "n" }, "1"), el("div", {},
       el("h2", {}, "Choose your photos"),
-      el("p", {}, "A Google Photos or Apple Photos export, or any folder with photos and videos. Nothing in it gets moved or deleted."))));
-    if (mac && pick.typing !== "source") box.append(el("div", { class: "acts" },
+      el("p", {}, "A folder with photos, videos and documents, a zip file, or a share link (Google Drive, Dropbox, OneDrive). Nothing in it gets moved or deleted."))));
+    if (pick.typing === "link") box.append(pathBox("source", "Paste a link, or the path of a .zip file"));
+    else if (mac && pick.typing !== "source") box.append(el("div", { class: "acts" },
       el("button", { class: "mx-btn solid big-btn", onclick: () => pickFolder("source") }, icon("folder"), "Choose folder"), typeLink("source")));
     else box.append(pathBox("source", "/Users/you/Pictures/Camera roll"));
+    if (pick.typing !== "link") box.append(el("button", { class: "linkish recent", onclick: () => { pick.typing = "link"; renderPanel(); } }, "Add a zip file or a share link instead"));
+    if (pick.importing) box.append(el("p", { class: "meta" }, icon("clock"), " " + pick.importing));
     if (S.source && S.source !== pick.source) box.append(el("button", { class: "linkish recent", onclick: () => choose("source", S.source) }, `Last time: ${tilde(S.source)}`));
     return box;
   }
   const pk = pick.peek;
   box.append(el("div", { class: "q done" }, el("span", { class: "n" }, icon("check")), el("div", {},
     el("h3", {}, "Photos"), el("div", { class: "picked", title: pick.source }, icon("folder"), el("span", {}, tilde(pick.source))),
-    pk ? el("p", { class: "meta" }, `${fmt(pk.photos)} photos · ${fmt(pk.videos)} videos · ${size(pk.bytes)}`) : el("p", { class: "meta" }, "Counting…")),
+    pk ? el("p", { class: "meta" }, `${fmt(pk.photos)} photos · ${fmt(pk.videos)} videos · ${fmt(pk.docs || 0)} documents${pk.zips ? ` · ${fmt(pk.zips)} zip files` : ""} · ${size(pk.bytes)}`) : el("p", { class: "meta" }, "Counting…")),
     el("button", { class: "linkish", onclick: () => { pick.source = pick.peek = pick.dest = null; pick.typing = null; resetStageForSetup(); renderPanel(); } }, "Change")));
 
   // 2. where to save
@@ -380,8 +394,9 @@ function setupCard() {
     el("button", { class: "linkish", onclick: () => { pick.dest = null; pick.typing = null; renderPanel(); } }, "Change")));
 
   // 3. start
-  const files = pk ? (pick.sample ? Math.min(200, pk.photos + pk.videos) : pk.photos + pk.videos) : 0;
-  const bytes = pk ? pk.bytes * (files / Math.max(1, pk.photos + pk.videos)) : 0;
+  const all = pk ? pk.photos + pk.videos + (pk.docs || 0) : 0;
+  const files = pick.sample ? Math.min(200, all) : all;
+  const bytes = pk ? pk.bytes * (files / Math.max(1, all)) : 0;
   const est = phaseEstimates(files, bytes, true), total = Object.values(est).reduce((a, b) => a + b, 0);
   box.append(el("div", { class: "start" },
     el("button", { class: "mx-btn solid big-btn wide", onclick: startSorting }, icon("play"), "Start sorting"),
@@ -407,7 +422,7 @@ function advancedBox(files) {
         let key = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "folder", i = 2;
         while (catBy[key]) key = key.replace(/-\d+$/, "") + "-" + i++;
         const at = cats.map(c => c.kind).lastIndexOf(kind);  // keep the catch-all folder last
-        const next = cats.slice(); next.splice(Math.max(0, at), 0, { key, kind, label, emoji: kind === "photo" ? "📁" : "🎬", rule: rule.value.trim() || label });
+        const next = cats.slice(); next.splice(Math.max(0, at), 0, { key, kind, label, emoji: { photo: "📁", video: "🎬", doc: "📄" }[kind], rule: rule.value.trim() || label });
         saveCats(next);
       };
       [name, rule].forEach(i => i.onkeydown = e => { if (e.key === "Enter") add(); if (e.key === "Escape") renderPanel(); });
@@ -422,9 +437,11 @@ function advancedBox(files) {
   return el("div", { class: "adv" },
     el("h4", {}, "Photo folders"), el("div", { class: "fchips" }, chips("photo"), adder("photo")),
     el("h4", {}, "Video folders"), el("div", { class: "fchips" }, chips("video"), adder("video")),
+    el("h4", {}, "Document folders"), el("div", { class: "fchips" }, chips("doc"), adder("doc")),
     el("p", { class: "meta" }, "The last folder of each kind catches everything that fits nowhere else."),
-    el("h4", {}, "Who looks at the photos"),
-    lab("claude", "Claude", "Uses your Claude plan. No key needed."),
+    el("h4", {}, "Who chooses the folders"),
+    lab("local", "This computer ", "Free, private, nothing leaves your computer. Uses faces, text and objects it finds.", el("span", { class: "free" }, "FREE")),
+    lab("claude", "Claude", "Uses your Claude plan. Sends small previews to Claude. Better with your own folders."),
     lab("jev", "Jev by TypeSafe ", S.jev_key ? `Fast image model, billed per file: about ${fmt(files * TOKENS_PER_FILE)} tokens.` : "Needs JEV_KEY=your-key in a .env file in this folder.",
       el("span", { class: "paid" }, "PAID")),
     el("label", { class: "check-row" }, el("input", { type: "checkbox", checked: pick.sample, onchange: e => { pick.sample = e.target.checked; renderPanel(); } }), "Try 200 random files first"));
@@ -443,14 +460,30 @@ async function pickFolder(key) {
     if (r.path) await choose(key, r.path);
   } catch (e) {}
 }
+async function importSource(src) {  // a zip file or a link: unpack / download first, then use that folder
+  pick.importing = /^https?:/i.test(src) ? "Downloading… big files can take a few minutes." : "Unpacking the zip…";
+  renderPanel();
+  try { await api("/api/run", { step: "import", source: src }); } catch (e) { pick.importing = null; renderPanel(); return; }
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1000));
+    try { S = await api("/api/state"); } catch (e) { continue; }
+    if (!S.job.running) break;
+    if (S.job.total) pick.importing = `Downloading… ${size(S.job.done)} of ${size(S.job.total)}`;
+    renderPanel();
+  }
+  pick.importing = null;
+  if (S.job.code !== 0 || !S.job.result) { toast((S.job.log || []).slice(-1)[0] || "Could not bring that in."); renderPanel(); return; }
+  return choose("source", S.job.result);
+}
 async function choose(key, path) {
   if (!path) return toast("Pick a folder first.");
+  if (key === "source" && (/^https?:\/\//i.test(path) || /\.zip$/i.test(path))) return importSource(path);
   pick[key] = path; pick.typing = null;
   if (key === "source") {
     pick.peek = null; pick.dest = null; renderPanel(); setHeader();
     try { pick.peek = await api("/api/peek", { source: path }); pick.source = pick.peek.source; }
     catch (e) { pick.source = null; renderPanel(); return; }
-    if (!pick.peek.photos && !pick.peek.videos) { toast("No photos or videos in that folder."); pick.source = null; }
+    if (!pick.peek.photos && !pick.peek.videos && !pick.peek.docs && !pick.peek.zips) { toast("No photos, videos or documents in that folder."); pick.source = null; }
     else buildSphere(pick.peek.previews.map(u => () => el("img", { src: u, alt: "" })));
   }
   renderPanel(); setHeader();
@@ -475,12 +508,12 @@ function sortWithClaude() {
 
 async function startSorting() {
   if (!pick.source || !pick.dest) return sortWithClaude();
-  const files = pick.peek ? pick.peek.photos + pick.peek.videos : 0;
+  const files = pick.peek ? pick.peek.photos + pick.peek.videos + (pick.peek.docs || 0) : 0;
   if (pick.labeler === "jev") {
     if (!S.jev_key) return toast("Add JEV_KEY=your-key to a .env file in this folder to use Jev.");
     if (!await confirmPaid(Math.min(files, pick.sample ? 200 : files))) return;
   }
-  if (pick.labeler === "claude" && S.claude_cli === false) return toast("Claude Code isn't installed on this computer. Install it, or pick Jev under Advanced.");
+  if (pick.labeler === "claude" && S.claude_cli === false) return toast("Claude Code isn't installed on this computer. Pick \"This computer\" under Advanced.");
   try {
     S = await api("/api/sort", { source: pick.source, dest: pick.dest, labeler: pick.labeler, limit: pick.sample ? 200 : 0 });
   } catch (e) { return; }
@@ -545,7 +578,7 @@ function runCard() {
   const steps = (j.phases || []).map(p => {
     const idx = j.phases.indexOf(p), cur = j.phases.indexOf(j.phase);
     const state = j.phase === "done" || idx < cur ? "ok" : p === j.phase ? (failed ? "bad" : "now") : "";
-    return el("li", { class: state }, state === "ok" ? icon("check") : el("i", {}), { scan: "Scan", dupes: "Duplicates", label: "Label", apply: "Folders" }[p]);
+    return el("li", { class: state }, state === "ok" ? icon("check") : el("i", {}), { import: "Import", scan: "Scan", dupes: "Duplicates", analyse: "Look inside", label: "Sort", apply: "Folders", excel: "Excel" }[p]);
   });
   const pct = j.total ? Math.round(j.done / j.total * 100) : 0;
   return el("div", { class: "run" },
@@ -588,7 +621,7 @@ function openFolders() {
   const list = el("div", { class: "folder-list" });
   const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "folder";
   function row(c) {
-    const seg = el("div", { class: "mx-seg" }, ["photo", "video"].map(k => el("button", { "aria-pressed": c.kind === k, onclick: () => { c.kind = k; render(); } }, k === "photo" ? "Photos" : "Videos")));
+    const seg = el("div", { class: "mx-seg" }, ["photo", "video", "doc"].map(k => el("button", { "aria-pressed": c.kind === k, onclick: () => { c.kind = k; render(); } }, { photo: "Photos", video: "Videos", doc: "Docs" }[k])));
     return el("div", { class: "folder-row" },
       el("input", { class: "emoji", value: c.emoji || "📁", "aria-label": "Emoji", oninput: e => c.emoji = e.target.value }),
       el("input", { value: c.label, placeholder: "Folder name", "aria-label": "Folder name", oninput: e => c.label = e.target.value }),
@@ -598,10 +631,11 @@ function openFolders() {
   }
   function render() {
     list.replaceChildren(el("h4", {}, "Photo folders"), ...draft.filter(c => c.kind === "photo").map(row),
-      el("h4", {}, "Video folders"), ...draft.filter(c => c.kind === "video").map(row));
+      el("h4", {}, "Video folders"), ...draft.filter(c => c.kind === "video").map(row),
+      el("h4", {}, "Document folders"), ...draft.filter(c => c.kind === "doc").map(row));
     paintIcons(list);
   }
-  const add = kind => () => { draft.push({ key: "", kind, label: "", emoji: kind === "photo" ? "📁" : "🎬", rule: "" }); render(); };
+  const add = kind => () => { draft.push({ key: "", kind, label: "", emoji: { photo: "📁", video: "🎬", doc: "📄" }[kind], rule: "" }); render(); };
   async function saveIt() {
     for (const c of draft) {
       if (!c.label.trim()) return toast("Every folder needs a name.");
@@ -617,10 +651,11 @@ function openFolders() {
     el("div", { class: "fb-dialog", role: "dialog", "aria-label": "Edit folders" },
       el("div", { class: "fb-head" }, el("h2", {}, "Folders"), el("button", { class: "mx-icon", onclick: closeAll, "aria-label": "Close" }, icon("x"))),
       el("div", { class: "fb-rows" }, list,
-        el("p", { class: "note" }, "The rule is what Claude reads, so describe each folder the way you'd explain it to a friend.")),
+        el("p", { class: "note" }, "Describe each folder in plain words. The free sorter looks for words it recognises (like \"cars\" or \"Swiggy\"); Claude reads the whole rule.")),
       el("div", { class: "fb-foot" },
         el("button", { class: "mx-btn", onclick: add("photo") }, icon("plus"), "Photo folder"),
         el("button", { class: "mx-btn", onclick: add("video") }, icon("plus"), "Video folder"),
+        el("button", { class: "mx-btn", onclick: add("doc") }, icon("plus"), "Document folder"),
         el("span", { class: "spacer" }),
         el("button", { class: "mx-btn ghost", onclick: closeAll }, "Cancel"),
         el("button", { class: "mx-btn solid", onclick: saveIt }, "Save folders")))));
@@ -652,7 +687,9 @@ let lbKeys = () => {};
 function lightbox(list, i) {
   const it = list[i];
   const full = DEMO ? it.src : `/api/file/${it.id}`;
-  const media = it.kind === "video" && !DEMO ? el("video", { src: full, controls: true, autoplay: true, playsinline: true, poster: it.src }) : el("img", { src: full, alt: it.name });
+  const media = it.kind === "video" && !DEMO ? el("video", { src: full, controls: true, autoplay: true, playsinline: true, poster: it.src })
+    : it.kind === "doc" && it.ext === ".pdf" && !DEMO ? el("iframe", { src: full, title: it.name, class: "docview" })
+    : el("img", { src: it.kind === "doc" ? it.src : full, alt: it.name });
   const move = el("select", { class: "mx-select", "aria-label": "Move to folder", onchange: async e => {
     const key = e.target.value;
     try { await api("/api/move", { id: it.id, key }); } catch (err) { return; }
@@ -723,6 +760,7 @@ async function init() {
   if (params.has("auto") && mode === "done") setTimeout(replay, 1200);
 }
 $("go").onclick = sortWithClaude;
+$("btnDetails").onclick = () => location.href = "details.html";
 $("btnNew").onclick = newSort;
 $("btnFolders").onclick = openFolders;
 $("btnOpen").onclick = () => api("/api/open", {}).catch(() => {});

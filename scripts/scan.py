@@ -1,13 +1,15 @@
-"""Step 1: inventory a photo folder (any folder, Google Takeout, Apple Photos export...).
+"""Step 1: inventory a folder of photos, videos and documents (any folder, Google Takeout, Apple Photos export...).
 
   python scripts/scan.py "/path/to/photos"              # everything
   python scripts/scan.py "/path/to/photos" --limit 200  # try a sample first
 
 Records size, sha256, dimensions, video length and (for Google Takeout) the .json sidecar
 date/GPS for each file, and makes a 256px square preview in dashboard/data/thumbs/.
+Zip files inside the folder are unpacked into inbox/ (once) and their files are included.
+Documents (PDF, Word, Excel, text...) get a preview of their first page.
 Read-only on your photos.
 """
-import argparse, hashlib, json, os, random, re, shutil, subprocess, sys
+import argparse, functools, hashlib, json, os, random, re, shutil, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image, ImageOps
@@ -20,7 +22,7 @@ except ImportError:
     pass
 
 sys.path.insert(0, os.path.dirname(__file__))
-from common import DATA, IMG, THUMBS, VID, save
+from common import DATA, INBOX, LABELS, THUMBS, WORK, kind_of, safe_unzip, save
 
 ap = argparse.ArgumentParser()
 ap.add_argument("source")
@@ -36,15 +38,24 @@ for d in (THUMBS, MINI):
     if os.path.isdir(d):
         shutil.rmtree(d)
     os.makedirs(d)
+# a new inventory means new ids: old contact sheets and labels would point at the wrong files
+for d in (LABELS, os.path.join(WORK, "sheets")):
+    shutil.rmtree(d, ignore_errors=True)
+for f in ("labels.json", "dupes.json"):
+    if os.path.exists(os.path.join(DATA, f)):
+        os.remove(os.path.join(DATA, f))
+
+
+@functools.lru_cache(maxsize=4096)
+def json_files(d):
+    return tuple(f for f in os.listdir(d) if f.endswith(".json"))
 
 
 def sidecar(path):
     """Google Takeout writes '<file>.json' or '<file>.supplemental-metadata.json' (often truncated)."""
     d, name = os.path.split(path)
     m = re.match(r"(.*?)(\(\d+\))(\.\w+)$", name)  # IMG_1(1).JPG -> IMG_1.JPG...(1).json
-    for f in os.listdir(d):
-        if not f.endswith(".json"):
-            continue
+    for f in json_files(d):
         if m and f.startswith(m.group(1) + m.group(3)) and f.endswith(m.group(2) + ".json"):
             return os.path.join(d, f)
         if not m and f.startswith(name + ".") and not re.search(r"\(\d+\)\.json$", f):
@@ -84,25 +95,71 @@ def video_info(path, thumb):
     return w, h, dur
 
 
+def doc_preview(path, ext, thumb):
+    """First page of a PDF; for other documents a paper tile with the file type."""
+    if ext == ".pdf":
+        try:
+            import pypdfium2 as pdfium
+            pdf = pdfium.PdfDocument(path)
+            page = pdf[0]
+            im = page.render(scale=300 / max(page.get_size())).to_pil()
+            pdf.close()
+            square_top(im).save(thumb, quality=80)
+            return
+        except Exception:
+            pass
+    from PIL import ImageDraw, ImageFont
+    colors = {".docx": (43, 87, 154), ".doc": (43, 87, 154), ".xlsx": (33, 115, 70), ".xls": (33, 115, 70),
+              ".csv": (33, 115, 70), ".ods": (33, 115, 70), ".pptx": (196, 72, 38), ".ppt": (196, 72, 38), ".pdf": (180, 40, 40)}
+    im = Image.new("RGB", (256, 256), (236, 233, 226))
+    d = ImageDraw.Draw(im)
+    d.rectangle((48, 24, 208, 232), fill="white", outline=(200, 196, 188))
+    for y in range(70, 200, 18):
+        d.line((66, y, 190, y), fill=(220, 217, 210), width=6)
+    font = None
+    for f in ("/System/Library/Fonts/Helvetica.ttc", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf"):
+        try:
+            font = ImageFont.truetype(f, 30)
+            break
+        except OSError:
+            pass
+    d.rounded_rectangle((60, 150, 196, 196), 8, fill=colors.get(ext, (90, 90, 100)))
+    d.text((128, 173), ext[1:].upper(), fill="white", font=font or ImageFont.load_default(), anchor="mm")
+    im.save(thumb, quality=85)
+
+
+def square_top(im, size=256):
+    """Square crop from the top, so a page preview shows its heading."""
+    im = im.convert("RGB")
+    s = min(im.size)
+    return im.crop(((im.width - s) // 2, 0, (im.width + s) // 2, s)).resize((size, size))
+
+
 def process(args):
     i, path = args
     ext = os.path.splitext(path)[1].lower()
-    kind = "video" if ext in VID else "photo"
+    kind = kind_of(path)
     rec = {"id": i, "path": path, "name": os.path.basename(path), "ext": ext, "kind": kind,
            "bytes": os.path.getsize(path), "sha256": sha(path)}
     thumb = os.path.join(THUMBS, f"{i}.jpg")
+    real_preview = True  # only real previews get a look-alike fingerprint (grey placeholders all look the same)
     try:
-        if kind == "video":
+        if kind == "doc":
+            doc_preview(path, ext, thumb)
+            real_preview = False
+        elif kind == "video":
             rec["w"], rec["h"], rec["duration"] = video_info(path, thumb)
             if not os.path.exists(thumb):  # no ffmpeg: grey placeholder so the dashboard still works
                 Image.new("RGB", (256, 256), (60, 60, 66)).save(thumb)
+                real_preview = False
         else:
             with Image.open(path) as im:
                 rec["w"], rec["h"] = im.size
                 im.draft("RGB", (512, 512))
                 square(ImageOps.exif_transpose(im)).save(thumb, quality=80)
         with Image.open(thumb) as t:
-            rec["phash"] = str(imagehash.phash(t))
+            if real_preview and t.convert("L").getextrema()[1] - t.convert("L").getextrema()[0] > 24:  # skip blank/black frames
+                rec["phash"] = str(imagehash.phash(t))
             t.convert("RGB").resize((72, 72)).save(os.path.join(MINI, f"{i}.jpg"), quality=72)
     except Exception as e:  # unreadable file: keep it in the inventory, flag it
         rec["error"] = str(e)[:200]
@@ -121,14 +178,33 @@ def process(args):
     return rec
 
 
-files = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(src) for f in fs
-               if os.path.splitext(f)[1].lower() in IMG | VID and not f.startswith("._"))
+def walk(top):
+    for dp, dirs, fs in os.walk(top):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and not d.endswith(" (sorted)")]
+        for f in fs:
+            if not f.startswith("._"):
+                yield os.path.join(dp, f)
+
+
+files, zips = [], []
+for p in walk(src):
+    (zips if p.lower().endswith(".zip") else files).append(p)
+for z in zips:  # Google Takeout and shared folders often come as zips: unpack once, include what's inside
+    st = os.stat(z)
+    dest = os.path.join(INBOX, "zips", hashlib.sha1(f"{z}|{st.st_size}|{st.st_mtime}".encode()).hexdigest()[:10]
+                        + " " + os.path.splitext(os.path.basename(z))[0][:40])
+    try:
+        print(f"Unpacking {os.path.basename(z)}...", flush=True)
+        files += list(walk(safe_unzip(z, dest)))
+    except Exception as e:
+        print(f"  could not unpack {os.path.basename(z)}: {e}", flush=True)
+files = sorted(f for f in files if kind_of(f))
 if not files:
-    sys.exit("No photos or videos found in that folder.")
+    sys.exit("No photos, videos or documents found in that folder.")
 if args.limit and args.limit < len(files):
     files = sorted(random.Random(0).sample(files, args.limit))
 print(f"Scanning {len(files)} files...", flush=True)
-if not HAS_FFMPEG and any(os.path.splitext(f)[1].lower() in VID for f in files):
+if not HAS_FFMPEG and any(kind_of(f) == "video" for f in files):
     print("  note: ffmpeg not installed, videos will get grey previews (Mac: brew install ffmpeg)")
 
 with ThreadPoolExecutor(8) as ex:
@@ -143,5 +219,6 @@ with ThreadPoolExecutor(8) as ex:
 save(os.path.join(DATA, "inventory.json"), recs)
 save(os.path.join(DATA, "source.json"), {"source": src, "limit": args.limit})
 bad = [r["name"] for r in recs if "error" in r]
-print(f"Done: {len(recs)} files ({sum(r['kind'] == 'video' for r in recs)} videos), "
+print(f"Done: {len(recs)} files ({sum(r['kind'] == 'video' for r in recs)} videos, "
+      f"{sum(r['kind'] == 'doc' for r in recs)} documents), "
       f"{sum(r['bytes'] for r in recs) / 1e9:.1f} GB" + (f", {len(bad)} unreadable: {bad[:5]}" if bad else ""))

@@ -53,8 +53,8 @@ def run(n, batch):
         f"{folders}\n\n"
         "Use the Read tool to look at each of these contact sheet images:\n" + "\n".join(batch) + "\n\n"
         "Each sheet shows up to 30 square previews, each tagged in yellow with a number (its id). "
-        "A tag with VIDEO is a video and must get a (video) folder. Every other tile is a photo and must get a "
-        "(photo) folder. PNG usually means a screenshot. Give every id you see exactly one folder key from the list.\n\n"
+        "A tag with VIDEO is a video and must get a (video) folder. A tag with DOC is a document and must get a (doc) "
+        "folder. Every other tile is a photo and must get a (photo) folder. PNG usually means a screenshot. Give every id you see exactly one folder key from the list.\n\n"
         "Reply with only a JSON object mapping id to folder key, like {\"12\": \"food\", \"13\": \"selfies\"}. No other text.")
     t0, why = time.time(), ""
     for attempt in range(4):  # Claude sometimes answers early (busy, rate limit): wait and ask again

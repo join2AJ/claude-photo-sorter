@@ -4,13 +4,16 @@ Serves dashboard/ plus a small local API so the page can do everything itself:
 pick folders, peek at a folder, run the whole sort (scan, duplicates, Claude labels,
 build folders) with live progress, edit folders, browse photos at full size, move a
 photo to another folder, and open folders in Finder.
-Listens on 127.0.0.1 only: nothing is reachable from other computers.
+Also: bring files in from a zip or share link, look inside every file (faces, text, things),
+the Details page (people, faces, screenshots, money, documents) and the Excel export.
+Listens on 127.0.0.1 only: nothing is reachable from other computers, and requests that come
+through another web address are refused (so a website can't read your photos via this server).
 """
 import glob, hashlib, io, json, mimetypes, os, random, re, shutil, subprocess, sys, threading, time, urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(__file__))
-from common import CATEGORIES, DATA, IMG, JEV_OUT, LABELS, ROOT, VID, WORK, load, save
+from common import CATEGORIES, DATA, DB, IMG, INBOX, JEV_OUT, KINDS, LABELS, ROOT, VID, WORK, kind_of, load, save
 
 PORT = int(os.environ.get("PORT", 8765))
 DASH = os.path.join(ROOT, "dashboard")
@@ -19,7 +22,8 @@ OVERRIDES = os.path.join(WORK, "overrides.json")
 SCRIPTS = os.path.join(ROOT, "scripts")
 PY = sys.executable
 job = {"step": None, "running": False, "log": [], "code": None, "phase": None, "phases": [], "done": 0, "total": 0,
-       "started": None, "phase_started": None, "timings": {}}
+       "started": None, "phase_started": None, "timings": {}, "result": None, "labeler": None}
+ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 
 
 def has_jev_key():
@@ -43,11 +47,13 @@ def state():
             "label": bool(claude_files) or os.path.exists(JEV_OUT),
             "jev_labels": os.path.exists(JEV_OUT),
             "apply": bool(src.get("sorted")) and os.path.exists(os.path.join(DATA, "labels.json")),
+            "analyse": os.path.exists(DB),
         },
         "jev_key": has_jev_key(),
         "claude_cli": bool(shutil.which("claude")),
         "overrides": len(load(OVERRIDES, {})),
-        "job": {k: job[k] for k in ("step", "running", "code", "phase", "phases", "done", "total", "started", "phase_started", "timings")}
+        "job": {k: job[k] for k in ("step", "running", "code", "phase", "phases", "done", "total", "started", "phase_started",
+                                    "timings", "result", "labeler")}
                | {"log": job["log"][-40:], "now": time.time()},
         "platform": sys.platform,
     }
@@ -85,6 +91,8 @@ def stream(cmd):
         m = re.match(r"PROGRESS (\d+) (\d+)", line)
         if m:
             job["done"], job["total"] = int(m.group(1)), int(m.group(2))
+        elif line.startswith("FOLDER "):
+            job["result"] = line[7:]
         else:
             job["log"].append(line)
     return p.wait()
@@ -95,7 +103,7 @@ def start_job(step, phases, body):
         raise RuntimeError("Something is already running. Wait for it to finish.")
     now = time.time()
     job.update(step=step, running=True, log=[f"$ {step}"], code=None, phase=None, phases=phases, done=0, total=0,
-               started=now, phase_started=now, timings={})
+               started=now, phase_started=now, timings={}, result=None)
     threading.Thread(target=body, daemon=True).start()
 
 
@@ -110,7 +118,7 @@ def sort_all(args):
     source = (args.get("source") or "").strip().rstrip("/")
     dest = (args.get("dest") or "").strip()
     limit = int(args.get("limit") or 0)
-    labeler = args.get("labeler") or "claude"
+    labeler = args.get("labeler") or "local"
     if not source or not os.path.isdir(os.path.expanduser(source)):
         raise ValueError("Choose the folder with your photos first.")
     if labeler == "claude" and not shutil.which("claude"):
@@ -120,7 +128,8 @@ def sort_all(args):
     src = load(os.path.join(DATA, "source.json"), {})
     have = os.path.exists(os.path.join(DATA, "inventory.json"))
     need_scan = not have or src.get("source") != os.path.expanduser(source) or int(src.get("limit") or 0) != limit
-    phases = (["scan"] if need_scan else []) + ["dupes", "label", "apply"]
+    phases = (["scan"] if need_scan else []) + ["dupes", "analyse", "label", "apply", "excel"]
+    job["labeler"] = labeler
 
     def body():
         def fail(code):
@@ -131,6 +140,8 @@ def sort_all(args):
                 return fail(1)
         if run_phase("dupes", [os.path.join(SCRIPTS, "dupes.py")]):
             return fail(1)
+        if run_phase("analyse", [os.path.join(SCRIPTS, "analyze.py")]):
+            return fail(1)
         marker = os.path.join(LABELS, ".categories")
         if load(marker) != categories_fingerprint():  # folders changed since the last labels
             shutil.rmtree(LABELS, ignore_errors=True)
@@ -138,7 +149,7 @@ def sort_all(args):
                 os.remove(JEV_OUT)
         os.makedirs(LABELS, exist_ok=True)
         save(marker, categories_fingerprint())
-        script = "label_jev.py" if labeler == "jev" else "label_claude.py"
+        script = {"jev": "label_jev.py", "claude": "label_claude.py"}.get(labeler, "label_local.py")
         if run_phase("label", [os.path.join(SCRIPTS, script)]):
             total = len(load(os.path.join(DATA, "inventory.json"), []))
             if not total or len(live_labels()) < 0.95 * total:
@@ -146,6 +157,8 @@ def sort_all(args):
             job["log"].append(f"A few files could not be labelled; they go to the catch-all folders.")
         if run_phase("apply", [os.path.join(SCRIPTS, "apply.py"), dest]):
             return fail(1)
+        if run_phase("excel", [os.path.join(SCRIPTS, "excel.py")]):
+            job["log"].append("The Excel file could not be written; everything else is done.")
         job.update(running=False, code=0, phase="done")
     start_job("sort", phases, body)
 
@@ -155,6 +168,8 @@ def run_single(step, args):
         "scan": ["scan.py", args.get("source", "")] + (["--limit", str(args["limit"])] if args.get("limit") else []),
         "dupes": ["dupes.py"], "estimate": ["label_jev.py", "--estimate"], "jev": ["label_jev.py"],
         "claude": ["label_claude.py"], "apply": ["apply.py", args.get("dest", "")],
+        "import": ["ingest.py", args.get("source", "")], "analyse": ["analyze.py"], "local": ["label_local.py"],
+        "excel": ["excel.py"],
     }
     if step not in cmds:
         raise ValueError("unknown step")
@@ -172,7 +187,7 @@ def peek(source):
     source = os.path.expanduser(source.strip().rstrip("/"))
     if not os.path.isdir(source):
         raise ValueError("That folder does not exist.")
-    photos, videos, size, pics = 0, 0, 0, []
+    photos, videos, docs, zips, size, pics = 0, 0, 0, 0, 0, []
     for dp, dirs, fs in os.walk(source):
         dirs[:] = [d for d in dirs if not d.startswith(".") and not d.endswith(" (sorted)")]
         for f in fs:
@@ -185,6 +200,10 @@ def peek(source):
                     pics.append(os.path.join(dp, f))
             elif ext in VID:
                 videos += 1
+            elif kind_of(f) == "doc":
+                docs += 1
+            elif ext == ".zip":
+                zips += 1
             else:
                 continue
             try:
@@ -211,8 +230,18 @@ def peek(source):
                 out.append(f"peek/{i}.jpg?{stamp}")
         except Exception:
             pass
-    return {"source": source, "photos": photos, "videos": videos, "bytes": size, "previews": out,
-            "suggested_dest": source + " (sorted)"}
+    return {"source": source, "photos": photos, "videos": videos, "docs": docs, "zips": zips, "bytes": size, "previews": out,
+            "suggested_dest": suggest_dest(source)}
+
+
+def suggest_dest(source):
+    """Next to the photos; for a zip or link we unpacked into inbox/, in the Pictures folder instead."""
+    if os.path.realpath(source).startswith(os.path.realpath(INBOX) + os.sep):
+        pics = os.path.expanduser("~/Pictures")
+        name = re.sub(r"^\d{4}-\d\d-\d\d \d{4} ", "", os.path.basename(source))
+        name = re.sub(r" \(\d+\)$", "", name)
+        return os.path.join(pics if os.path.isdir(pics) else os.path.expanduser("~"), name + " (sorted)")
+    return source + " (sorted)"
 
 
 def open_path(path, reveal=False):
@@ -257,8 +286,23 @@ class H(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
+    def host_ok(self):
+        if self.headers.get("Host") in ALLOWED_HOSTS:
+            return True
+        self.send_error(403, "Open the photo sorter at http://127.0.0.1:%d" % PORT)
+        return False
+
     def do_GET(self):
+        if not self.host_ok():
+            return
         u = urllib.parse.urlparse(self.path)
+        if u.path == "/api/details":
+            return self.send_json(details_json())
+        m = re.match(r"^/api/text/(\d+)$", u.path)
+        if m:
+            return self.send_json(file_text(int(m.group(1))))
+        if u.path == "/api/excel":
+            return self.send_excel()
         if u.path == "/api/state":
             return self.send_json(state())
         if u.path == "/api/labels":
@@ -322,7 +366,26 @@ class H(SimpleHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+    def send_excel(self):
+        if job["running"]:
+            return self.send_json({"error": "Wait for the sort to finish."}, 409)
+        sys.path.insert(0, SCRIPTS)
+        import excel
+        try:
+            path = excel.build(excel.default_out())
+        except Exception as e:
+            return self.send_json({"error": f"Could not write the Excel file: {e}"}, 500)
+        b = open(path, "rb").read()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.send_header("Content-Disposition", 'attachment; filename="Library details.xlsx"')
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
     def do_POST(self):
+        if not self.host_ok():
+            return
         if self.headers.get("Origin") not in (None, f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"):
             return self.send_json({"error": "forbidden"}, 403)  # only this page may call the API
         n = int(self.headers.get("Content-Length", 0) or 0)
@@ -338,7 +401,7 @@ class H(SimpleHTTPRequestHandler):
             elif p == "/api/categories":
                 cats = body["categories"]
                 keys = [c["key"] for c in cats]
-                if len(keys) != len(set(keys)) or not all(c.get("label") and c.get("kind") in ("photo", "video") for c in cats):
+                if len(keys) != len(set(keys)) or not all(c.get("label") and c.get("kind") in KINDS for c in cats):
                     raise ValueError("Every folder needs a name.")
                 if not any(c["kind"] == "photo" for c in cats) or not any(c["kind"] == "video" for c in cats):
                     raise ValueError("Keep at least one photo folder and one video folder.")
@@ -362,6 +425,15 @@ class H(SimpleHTTPRequestHandler):
                     open_path(path if os.path.isdir(path) else src["sorted"])
                 else:
                     raise ValueError("Sort first, then the folders can be opened.")
+            elif p == "/api/person":
+                update_person(body)
+                return self.send_json({"ok": True})
+            elif p == "/api/merge":
+                merge_people(int(body["into"]), [int(x) for x in body["people"]])
+                return self.send_json({"ok": True})
+            elif p == "/api/face":
+                move_face(int(body["face_id"]), body.get("person_id"))
+                return self.send_json({"ok": True})
             elif p == "/api/pick":
                 return self.send_json({"path": pick_folder(body.get("prompt") or "Choose the folder with your photos")})
             else:
@@ -369,6 +441,127 @@ class H(SimpleHTTPRequestHandler):
         except Exception as e:
             return self.send_json({"error": str(e)}, 400)
         return self.send_json(state())
+
+
+# ---------- people & details ----------
+
+def db_conn():
+    import sqlite3
+    if not os.path.exists(DB):
+        raise ValueError("Sort first: people and details appear after the files have been looked at.")
+    db = sqlite3.connect(DB, timeout=30)
+    db.row_factory = sqlite3.Row
+    return db
+
+
+def details_json():
+    sys.path.insert(0, SCRIPTS)
+    import details
+    L = details.library()
+    for f in L["files"]:
+        f["text"] = f["text"][:600]
+    people = sorted(L["people"].values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))
+    return {"files": L["files"], "faces": L["faces"], "people": people, "source": L["source"],
+            "categories": L["categories"], "running": job["running"]}
+
+
+def file_text(i):
+    inv = load(os.path.join(DATA, "inventory.json"), [])
+    rec = next((r for r in inv if r["id"] == i), None)
+    if not rec:
+        return {"text": ""}
+    row = db_conn().execute("SELECT text FROM files WHERE sha256=?", (rec["sha256"],)).fetchone()
+    return {"text": row["text"] if row and row["text"] else ""}
+
+
+def log_consent(db, person_id, action, detail=""):
+    db.execute("INSERT INTO consent_log (person_id, action, detail, at) VALUES (?,?,?,?)",
+               (person_id, action, detail, time.strftime("%Y-%m-%d %H:%M:%S")))
+
+
+def update_person(b):
+    pid = int(b["person_id"])
+    db = db_conn()
+    cur = db.execute("SELECT * FROM people WHERE person_id=?", (pid,)).fetchone()
+    if not cur:
+        raise ValueError("That person no longer exists.")
+    fields = {}
+    if "name" in b:
+        fields["name"] = (b["name"] or "").strip()[:80] or None
+    if "mobile" in b:
+        m = re.sub(r"[\s\-()]", "", b["mobile"] or "")
+        if m and not re.fullmatch(r"\+?\d{7,15}", m):
+            raise ValueError("A mobile number has 7 to 15 digits, optionally starting with +.")
+        fields["mobile"] = m or None
+        if m != (cur["mobile"] or ""):
+            fields["mobile_verified"] = 0  # a new number has to be verified again
+    if "notes" in b:
+        fields["notes"] = (b["notes"] or "").strip()[:500]
+    for k in ("share_with", "hide_from"):
+        if k in b:
+            fields[k] = ",".join(str(int(x)) for x in b[k] if str(x).isdigit() and int(x) != pid)
+    if "consent" in b:
+        if b["consent"] not in ("pending", "yes", "no"):
+            raise ValueError("Consent is yes, no or pending.")
+        if b["consent"] != cur["consent"]:
+            fields["consent"], fields["consent_at"] = b["consent"], time.strftime("%Y-%m-%d %H:%M:%S")
+            log_consent(db, pid, "consent " + b["consent"], "set on the Details page by the owner")
+    if fields:
+        db.execute(f"UPDATE people SET {', '.join(k + '=?' for k in fields)} WHERE person_id=?", [*fields.values(), pid])
+        db.commit()
+
+
+def recompute(db, pid):
+    import numpy as np
+    embs = [np.frombuffer(r["embedding"], np.float32) for r in db.execute("SELECT embedding FROM faces WHERE person_id=?", (pid,))]
+    if not embs:
+        p = db.execute("SELECT name, mobile FROM people WHERE person_id=?", (pid,)).fetchone()
+        if p and not p["name"] and not p["mobile"]:
+            db.execute("DELETE FROM people WHERE person_id=?", (pid,))
+        else:
+            db.execute("UPDATE people SET centroid=NULL, n=0 WHERE person_id=?", (pid,))
+        return
+    c = np.mean(embs, axis=0)
+    db.execute("UPDATE people SET centroid=?, n=? WHERE person_id=?", ((c / np.linalg.norm(c)).astype(np.float32).tobytes(), len(embs), pid))
+
+
+def merge_people(into, others):
+    """These people are the same person: keep `into` (its name wins, others fill in what's missing)."""
+    db = db_conn()
+    keep = db.execute("SELECT * FROM people WHERE person_id=?", (into,)).fetchone()
+    if not keep:
+        raise ValueError("That person no longer exists.")
+    for o in others:
+        if o == into:
+            continue
+        p = db.execute("SELECT * FROM people WHERE person_id=?", (o,)).fetchone()
+        if not p:
+            continue
+        for k in ("name", "mobile", "notes"):
+            if p[k] and not keep[k]:
+                db.execute(f"UPDATE people SET {k}=? WHERE person_id=?", (p[k], into))
+        db.execute("UPDATE faces SET person_id=?, manual=1 WHERE person_id=?", (into, o))
+        db.execute("DELETE FROM people WHERE person_id=?", (o,))
+        log_consent(db, into, "merged", f"P{o:04d} merged into P{into:04d}")
+    recompute(db, into)
+    db.commit()
+
+
+def move_face(face_id, person_id):
+    """A face was given to the wrong person: move it to another person, or to a new one."""
+    db = db_conn()
+    f = db.execute("SELECT person_id FROM faces WHERE face_id=?", (face_id,)).fetchone()
+    if not f:
+        raise ValueError("That face no longer exists.")
+    if person_id in (None, "", "new"):
+        person_id = db.execute("INSERT INTO people (n, created_at) VALUES (0, ?)", (time.strftime("%Y-%m-%d %H:%M:%S"),)).lastrowid
+    person_id = int(person_id)
+    if not db.execute("SELECT 1 FROM people WHERE person_id=?", (person_id,)).fetchone():
+        raise ValueError("That person no longer exists.")
+    db.execute("UPDATE faces SET person_id=?, manual=1 WHERE face_id=?", (person_id, face_id))
+    recompute(db, person_id)
+    recompute(db, f["person_id"])
+    db.commit()
 
 
 if __name__ == "__main__":

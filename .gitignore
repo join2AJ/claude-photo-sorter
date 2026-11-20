@@ -8,3 +8,6 @@ work/
 __pycache__/
 .DS_Store
 .claude/
+inbox/
+models/
+*.xlsx

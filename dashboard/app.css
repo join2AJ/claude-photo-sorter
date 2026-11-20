@@ -195,3 +195,5 @@ input, textarea, select { font: 13px var(--font); }
   .topbar .mx-pill { display: none; }
   #btnNew { width: 34px; padding: 0; font-size: 0; gap: 0; }
 }
+.free { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--green-tint); color: var(--green); font-size: 10.5px; font-weight: 700; }
+.lightbox .media iframe.docview { width: min(900px, 92vw); height: 80vh; border: 0; background: #fff; border-radius: 8px; }

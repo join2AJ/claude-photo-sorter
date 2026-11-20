@@ -40,6 +40,8 @@ for s in range(0, len(recs), N):
         tag = str(r["id"])
         if r["kind"] == "video":
             tag += f" VIDEO {r.get('duration', 0):.0f}s"
+        elif r["kind"] == "doc":
+            tag += " DOC"
         elif r["ext"] == ".png":
             tag += " PNG"
         d.rectangle((x + 4, y + 4, x + 14 + 13 * len(tag), y + 32), fill="black")
