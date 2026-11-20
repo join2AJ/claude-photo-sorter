@@ -1,0 +1,6 @@
+# Netlify hosts the public demo only (drawn pictures, made-up people). Rebuild it with: python scripts/build_site.py
+# The real app runs on your own computer: it needs to read your photo folders, which no website can do.
+[build]
+  base = "site"
+  publish = "."
+  command = "echo 'Static demo: nothing to build'"

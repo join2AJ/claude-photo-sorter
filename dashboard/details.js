@@ -1,6 +1,8 @@
 /* Details page: everything found inside the library. Plain JS, no build step.
    Tabs: Everything, People, Faces, Screenshots, Money, Documents, Videos. Data comes from /api/details. */
 const $ = id => document.getElementById(id);
+const DEMO = new URLSearchParams(location.search).has("demo") || !!window.STATIC_DEMO;  // made-up library, no server
+const BASE = DEMO ? "demo/" : "data/";
 const fmt = n => n == null ? "" : Math.round(n).toLocaleString("en-US");
 const money = n => n == null ? "" : n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const size = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : Math.round(b / 1e3) + " KB";
@@ -30,6 +32,7 @@ const icon = n => { const s = el("span", { "data-icon": n }); s.innerHTML = svg(
 const paintIcons = (root = document) => root.querySelectorAll("[data-icon]").forEach(e => { if (!e.firstChild) e.innerHTML = svg(e.dataset.icon); });
 function toast(t) { const e = $("toast"); e.textContent = t; e.classList.add("on"); clearTimeout(e.t); e.t = setTimeout(() => e.classList.remove("on"), 3200); }
 async function api(path, body) {
+  if (DEMO) return demoApi(path, body);
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
   const j = await r.json();
   if (j && j.error) { toast(j.error); throw new Error(j.error); }
@@ -54,16 +57,20 @@ try { Object.assign(ui, JSON.parse(sessionStorage.getItem("details-ui") || "{}")
 const remember = () => { try { sessionStorage.setItem("details-ui", JSON.stringify({ tab: ui.tab, minPhotos: ui.minPhotos })); } catch (e) {} };
 
 async function load() {
-  try { D = await api("/api/details"); }
+  if (DEMO && D.people.length) { indexes(); kpis(); tabs(); render(); return; }  // the demo keeps edits in memory
+  try { D = DEMO ? await fetch(BASE + "details.json").then(r => r.json()) : await api("/api/details"); }
   catch (e) { $("view").replaceChildren(el("p", { class: "mx-empty" }, "Nothing to show yet. Go back and sort a folder first.")); return; }
+  indexes();
+  $("source").textContent = (D.source.source || "").replace(/^\/Users\/[^/]+/, "~") + (DEMO ? " · demo: drawn pictures, made-up people" : "");
+  kpis(); tabs(); render();
+}
+function indexes() {
   byFile = Object.fromEntries(D.files.map(f => [f.id, f]));
   byPerson = Object.fromEntries(D.people.map(p => [p.person_id, p]));
   byFace = Object.fromEntries(D.faces.map(f => [f.face_id, f]));
-  $("source").textContent = (D.source.source || "").replace(/^\/Users\/[^/]+/, "~");
-  kpis(); tabs(); render();
 }
-const thumb = f => `data/thumbs/${f.id}.jpg`;
-const faceImg = id => `data/faces/${id}.jpg`;
+const thumb = f => `${BASE}thumbs/${f.id}.jpg`;
+const faceImg = id => `${BASE}faces/${id}.jpg`;
 const personName = id => byPerson[id] ? byPerson[id].display : "";
 
 function kpis() {
@@ -223,12 +230,12 @@ function personDrawer(p) {
   const faces = D.faces.filter(f => f.person_id === p.person_id);
   const files = p.files.map(i => byFile[i]).filter(Boolean);
   const others = D.people.filter(o => o.person_id !== p.person_id && (o.name || o.photos + o.videos > 1)).slice(0, 60);
-  const draft = { name: p.name || "", mobile: p.mobile || "", notes: p.hints || "", consent: p.consent,
+  const draft = { name: p.name || "", mobile: p.mobile || "", notes: p.notes || "", consent: p.consent,
     share_with: new Set((p.share_with || "").split(",").filter(Boolean).map(Number)),
     hide_from: new Set((p.hide_from || "").split(",").filter(Boolean).map(Number)) };
   const name = el("input", { class: "field", value: draft.name, placeholder: `Person ${p.person_id}`, oninput: e => draft.name = e.target.value });
   const mobile = el("input", { class: "field", value: draft.mobile, placeholder: "+91 98765 43210", inputmode: "tel", oninput: e => draft.mobile = e.target.value });
-  const notes = el("input", { class: "field", value: draft.hints, placeholder: "e.g. cousin, office team", oninput: e => draft.hints = e.target.value });
+  const notes = el("input", { class: "field", value: draft.notes, placeholder: "e.g. cousin, office team", oninput: e => draft.notes = e.target.value });
   const consent = el("select", { class: "mx-select", onchange: e => draft.consent = e.target.value },
     [["pending", "Not asked yet (blurred for others)"], ["yes", "Yes, others in the photo may see my face"], ["no", "No, blur my face for others"]]
       .map(([v, t]) => el("option", { value: v, selected: draft.consent === v }, t)));
@@ -240,7 +247,7 @@ function personDrawer(p) {
   }) : el("span", { class: "hint" }, "Name more people to choose from."));
   const save = async () => {
     try {
-      await api("/api/person", { person_id: p.person_id, name: draft.name, mobile: draft.mobile, notes: draft.hints, consent: draft.consent,
+      await api("/api/person", { person_id: p.person_id, name: draft.name, mobile: draft.mobile, notes: draft.notes, consent: draft.consent,
         share_with: [...draft.share_with], hide_from: [...draft.hide_from] });
     } catch (e) { return; }
     toast("Saved."); close(); await load();
@@ -298,11 +305,11 @@ function viewFaces() {
 
 /* ---------- viewer: the file, its faces with boxes, and every detail ---------- */
 async function viewer(f) {
-  const src = `/api/file/${f.id}`;
+  const src = DEMO ? thumb(f) : `/api/file/${f.id}`;
   const faces = f.face_ids.map(i => byFace[i]).filter(Boolean);
   const pic = el("div", { class: "pic" });
-  if (f.kind === "video") pic.append(el("video", { src, controls: true, autoplay: true, playsinline: true, poster: thumb(f) }));
-  else if (f.kind === "doc" && f.ext === ".pdf") pic.append(el("iframe", { src, title: f.name }));
+  if (f.kind === "video" && !DEMO) pic.append(el("video", { src, controls: true, autoplay: true, playsinline: true, poster: thumb(f) }));
+  else if (f.kind === "doc" && f.ext === ".pdf" && !DEMO) pic.append(el("iframe", { src, title: f.name }));
   else {
     const img = el("img", { src: f.kind === "doc" ? thumb(f) : src, alt: f.name });
     pic.append(img);
@@ -326,7 +333,7 @@ async function viewer(f) {
       el("span", { class: "fid" }, `${fid(x.face_id)} · ${pid(x.person_id)}`), el("b", {}, x.person),
       el("span", {}, x.age ? `${x.age} · ${x.gender} · ${x.emotion}` : "small face", x.frame_s != null ? ` · at ${x.frame_s}s` : "")))) : null,
     f.text ? el("h3", {}, "Text found") : null, f.text ? text : null,
-    el("div", { class: "toolbar" }, el("button", { class: "mx-btn small", onclick: () => api("/api/open", { id: f.id }).catch(() => {}) }, icon("reveal"), "Show original")));
+    DEMO ? null : el("div", { class: "toolbar" }, el("button", { class: "mx-btn small", onclick: () => api("/api/open", { id: f.id }).catch(() => {}) }, icon("reveal"), "Show original")));
   const box = el("div", { class: "viewer", role: "dialog", "aria-label": f.name },
     el("div", { class: "vstage", onclick: e => e.target === e.currentTarget && close() }, pic,
       el("button", { class: "mx-icon close", "aria-label": "Close", onclick: () => close() }, icon("x"))), aside);
@@ -334,9 +341,32 @@ async function viewer(f) {
   function close() { box.remove(); document.removeEventListener("keydown", keys); }
   document.addEventListener("keydown", keys);
   document.body.append(box); paintIcons(box);
-  if (f.text && f.text.length >= 600) api(`/api/text/${f.id}`).then(r => text.textContent = r.text).catch(() => {});
+  if (!DEMO && f.text && f.text.length >= 600) api(`/api/text/${f.id}`).then(r => text.textContent = r.text).catch(() => {});
 }
 
-$("excel").onclick = e => { e.preventDefault(); toast("Making the Excel file…"); location.href = "/api/excel"; };
+$("excel").onclick = e => {
+  e.preventDefault();
+  if (DEMO) { location.href = BASE + "Library%20details%20(demo).xlsx"; return; }
+  toast("Making the Excel file…"); location.href = "/api/excel";
+};
+if (DEMO) document.querySelectorAll('a[href="./"]').forEach(a => a.href = window.STATIC_DEMO ? "./" : "./?demo");
+
+/* The demo has no server: changes are kept in this page only, until it is reloaded. */
+async function demoApi(path, body) {
+  if (path === "/api/person") {
+    const p = D.people.find(x => x.person_id === body.person_id);
+    const mobile = (body.mobile || "").replace(/[\s\-()]/g, "");
+    if (mobile && !/^\+?\d{7,15}$/.test(mobile)) { toast("A mobile number has 7 to 15 digits, optionally starting with +."); throw new Error("mobile"); }
+    Object.assign(p, { name: body.name.trim() || null, mobile: mobile || null, notes: body.notes, consent: body.consent,
+      share_with: body.share_with.join(","), hide_from: body.hide_from.join(",") });
+    p.display = p.name || `Person ${p.person_id}`;
+    D.faces.forEach(f => { if (f.person_id === p.person_id) f.person = p.display; });
+    D.files.forEach(f => { if (f.people_ids.length) f.people = f.people_ids.map(i => (D.people.find(x => x.person_id === i) || {}).display).join(", "); });
+    toast("Demo: saved in this page only.");
+    return { ok: true };
+  }
+  toast("Not in the demo. Install the app to merge people and move faces.");
+  throw new Error("demo");
+}
 paintIcons();
 load();

@@ -71,8 +71,9 @@ def table(ws, name, headers, rows, widths, style="TableStyleMedium2", pics=None,
     return ws
 
 
-def build(out):
-    L = library()
+def build(out, L=None, base=DATA):
+    """L: a library() dict (the demo passes its own); base: where the mini/ and faces/ pictures are."""
+    L = L or library()
     files, faces, people = L["files"], L["faces"], L["people"]
     wb = Workbook()
 
@@ -94,7 +95,7 @@ def build(out):
                      f["company"], f["content"], f["amount"], f["currency"], f["direction"], f["txn_ids"],
                      mb(f["bytes"]), f["width"], f["height"], round(f["duration"], 1) if f["duration"] else None,
                      f"{f['lat']:.5f}, {f['lon']:.5f}" if f["lat"] is not None else "", f["duplicate_of"], "", ""])
-        pics.append(os.path.join(DATA, "mini", f"{f['id']}.jpg"))
+        pics.append(os.path.join(base, "mini", f"{f['id']}.jpg"))
     table(ws, "AllFiles", hdr, rows, [9, 8, 28, 8, 22, 16, 18, 30, 16, 18, 7, 14, 14, 16, 30, 10, 20, 18, 11, 9, 10, 26,
                                       9, 7, 7, 9, 20, 20, 40, 40], pics=pics, pic_col=1, row_h=48)
     for n, f in enumerate(files, 2):
@@ -117,7 +118,7 @@ def build(out):
              p["gender_est"], p["emotion_usual"], p["emotion_mix"], p["first"], p["last"],
              ", ".join(map(str, p["files"][:200]))] for p in plist]
     table(ws, "People", hdr, rows, [11, 10, 20, 11, 15, 10, 11, 8, 8, 9, 9, 11, 13, 26, 16, 16, 40],
-          style="TableStyleMedium7", pics=[os.path.join(DATA, "faces", f"{p['cover']}.jpg") if p["cover"] else None for p in plist],
+          style="TableStyleMedium7", pics=[os.path.join(base, "faces", f"{p['cover']}.jpg") if p["cover"] else None for p in plist],
           pic_col=1, row_h=64)
 
     # ---- Faces
@@ -129,7 +130,7 @@ def build(out):
              f["gender_conf"], f["emotion"] or "", f["emotion_conf"], f"{f['w']}×{f['h']}", f["score"], "yes" if f["manual"] else ""]
             for f in faces]
     table(ws, "Faces", hdr, rows, [11, 10, 10, 18, 28, 10, 10, 11, 10, 11, 9, 12, 9, 11, 9, 10], style="TableStyleMedium4",
-          pics=[os.path.join(DATA, "faces", f"{f['face_id']}.jpg") for f in faces], pic_col=1, row_h=64)
+          pics=[os.path.join(base, "faces", f"{f['face_id']}.jpg") for f in faces], pic_col=1, row_h=64)
     for row in ws.iter_rows(min_row=2, min_col=11, max_col=15):
         for c in row:
             if isinstance(c.value, float) and c.value <= 1:
@@ -143,7 +144,7 @@ def build(out):
     rows = [["", f["id"], f["name"], f["taken"], f["company"], f["sector"], f["content"], f["amount"], f["currency"],
              f["direction"], f["txn_ids"], f["tags"], f["text"][:400], f["folder"], ""] for f in shots]
     table(ws, "Screenshots", hdr, rows, [9, 8, 28, 16, 22, 16, 16, 11, 9, 10, 26, 22, 60, 22, 40], style="TableStyleMedium3",
-          pics=[os.path.join(DATA, "mini", f"{f['id']}.jpg") for f in shots], pic_col=1, row_h=48)
+          pics=[os.path.join(base, "mini", f"{f['id']}.jpg") for f in shots], pic_col=1, row_h=48)
     for n, f in enumerate(shots, 2):
         ws.cell(n, 13).alignment = WRAP
         link(ws.cell(n, 15), f["path"])
@@ -176,7 +177,7 @@ def build(out):
     rows = [["", f["id"], f["name"], f["ext"][1:].upper(), f["content"], f["company"], f["amount"], f["currency"],
              f["txn_ids"], mb(f["bytes"]), f["folder"], f["text"][:400], ""] for f in docs]
     table(ws, "Documents", hdr, rows, [9, 8, 30, 7, 18, 20, 11, 9, 26, 9, 24, 60, 40], style="TableStyleMedium5",
-          pics=[os.path.join(DATA, "mini", f"{f['id']}.jpg") for f in docs], pic_col=1, row_h=48)
+          pics=[os.path.join(base, "mini", f"{f['id']}.jpg") for f in docs], pic_col=1, row_h=48)
     for n, f in enumerate(docs, 2):
         ws.cell(n, 12).alignment = WRAP
         link(ws.cell(n, 13), f["path"])
@@ -190,7 +191,7 @@ def build(out):
              ", ".join(pid(i) for i in f["people_ids"]) or NO_FACE, f["tags"], mb(f["bytes"]), f["folder"],
              f"{f['lat']:.5f}, {f['lon']:.5f}" if f["lat"] is not None else "", ""] for f in vids]
     table(ws, "Videos", hdr, rows, [9, 8, 28, 16, 9, 18, 30, 16, 26, 9, 22, 20, 40], style="TableStyleMedium9",
-          pics=[os.path.join(DATA, "mini", f"{f['id']}.jpg") for f in vids], pic_col=1, row_h=48)
+          pics=[os.path.join(base, "mini", f"{f['id']}.jpg") for f in vids], pic_col=1, row_h=48)
     for n, f in enumerate(vids, 2):
         link(ws.cell(n, 13), f["path"])
 

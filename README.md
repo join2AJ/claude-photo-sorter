@@ -114,6 +114,16 @@ Faces, text, the Details page and the Excel file always come from your computer,
 
 People log in with their mobile number and see only photos they're in. In a group photo, a person's face is shown only if they said yes; otherwise it's blurred. People who haven't registered stay blurred. Each person can choose who sees their face. The data for this (mobile numbers, consent, share/hide lists, consent log) is already recorded on the Details page.
 
+## Public demo website (Netlify)
+
+`site/` is a ready-made demo website: the sorting animation, the Details page (people, faces, screenshots, money, documents) and a sample Excel download, all from **drawn pictures and made-up people**. It needs no server, so any static host works.
+
+- **Netlify, from GitHub:** Add new site > Import from Git > pick this repo. `netlify.toml` already points Netlify at `site/`, so leave the build settings as they are and press Deploy.
+- **Netlify, by hand:** open [app.netlify.com/drop](https://app.netlify.com/drop) and drag the `site` folder onto the page.
+- **After changing the app:** run `python scripts/build_site.py` to rebuild `site/`, then commit (or drag it again).
+
+The demo never contains real photos. Sorting real photos needs the app on your own computer (below).
+
 ## Running it by hand
 
 ```bash

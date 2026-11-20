@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Library details</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7' fill='%23c2412f'/%3E%3Crect x='6' y='6' width='12' height='12' rx='2' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="details.css">
+</head>
+<body class="details">
+<header class="topbar">
+  <a class="mx-logo" href="./"><i data-icon="images"></i><span class="lbl">photo sorter</span></a>
+  <a class="mx-btn ghost small" href="./"><i data-icon="left"></i><span class="lbl">Sorting</span></a>
+  <span class="spacer"></span>
+  <button class="mx-icon" id="theme" aria-label="Switch theme"></button>
+  <a class="mx-btn solid" id="excel" href="/api/excel"><i data-icon="download"></i>Excel<span class="lbl">&nbsp;file</span></a>
+</header>
+<main class="page">
+  <div class="mx-title">
+    <h1>Library details</h1>
+    <span class="mx-sub" id="source"></span>
+  </div>
+  <section class="mx-kpis" id="kpis" style="--n:8"></section>
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <div class="toolbar" id="toolbar"></div>
+  <section id="view"></section>
+</main>
+<div id="overlay"></div>
+<div class="toast" id="toast" role="status"></div>
+<script>window.STATIC_DEMO = true;</script>
+<script src="details.js"></script>
+</body>
+</html>

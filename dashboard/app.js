@@ -2,7 +2,7 @@
    States: setup (choose folders) -> running (live sort) -> done (results, replay).
    ?demo   the fake camera roll in demo/      ?d=20  replay length in seconds      ?auto  replay by itself */
 const params = new URLSearchParams(location.search);
-const DEMO = params.has("demo");
+const DEMO = params.has("demo") || !!window.STATIC_DEMO;  // STATIC_DEMO: the public demo website (build_site.py)
 const BASE = DEMO ? "demo/" : "data/";
 const REPLAY_MS = (+params.get("d") || 12) * 1000;
 const TOKENS_PER_FILE = 980;
@@ -69,7 +69,7 @@ const queue = [], flown = new Set();
 const stats = { photos: 0, videos: 0, docs: 0, dupes: 0, saved: 0 };
 
 async function api(path, body) {
-  if (DEMO) { toast("This is the demo. Run ./start.sh to sort your own photos."); throw new Error("demo"); }
+  if (DEMO) { toast("This is a demo with drawn pictures. Install the app to sort your own photos."); throw new Error("demo"); }
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
   const j = await r.json();
   if (j && j.error) { toast(j.error); throw new Error(j.error); }
@@ -110,7 +110,7 @@ function setHeader() {
   $("total").textContent = fmt(items.length);
   $("btnOpen").hidden = !(mode === "done" && S.sorted);
   $("btnNew").hidden = mode !== "done";
-  $("go").querySelector("span:last-child").textContent = mode === "done" ? "Replay" : "Start sorting";
+  $("go").querySelector(".lbl").textContent = mode === "done" ? "Replay" : "Start sorting";
   $("k-checked-s").textContent = items.length && mode !== "setup" ? size(items.reduce((s, r) => s + r.bytes, 0)) + " in total" : "photos, videos & docs";
   document.body.dataset.mode = mode;
 }
@@ -760,7 +760,7 @@ async function init() {
   if (params.has("auto") && mode === "done") setTimeout(replay, 1200);
 }
 $("go").onclick = sortWithClaude;
-$("btnDetails").onclick = () => location.href = "details.html";
+$("btnDetails").onclick = () => location.href = "details.html" + (DEMO && !window.STATIC_DEMO ? "?demo" : "");
 $("btnNew").onclick = newSort;
 $("btnFolders").onclick = openFolders;
 $("btnOpen").onclick = () => api("/api/open", {}).catch(() => {});
