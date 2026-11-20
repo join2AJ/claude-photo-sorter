@@ -41,7 +41,7 @@ Never read `Photos Library.photoslibrary` directly.
 5. Build folders: copies into `<their folder> (sorted)` (for imports: `~/Pictures/<name> (sorted)`).
 6. Excel: `scripts/excel.py` writes `Library details.xlsx` into the sorted folder.
 
-The **Details & people** page (`dashboard/details.html`) has tabs for Everything, People, Faces, Screenshots, Money, Documents and Videos. On People they can name someone, add a mobile number, set consent (pending / yes / no), choose who to show or hide their face from, move a wrong face, and merge two people. Mobile verification, logins and face blurring are part 2 (not built yet): consent and share lists are only recorded for now.
+The **Details & people** page (`dashboard/details.html`) has tabs for Everything, People, Faces, Screenshots, Money, Documents and Videos. On People they can name someone, add a mobile number, set consent (pending / yes / no), choose who to show or hide their face from, move a wrong face, and merge two people. On People they can also tick **Family member** and add "Names on their documents"; the **Family** tab then files that person's papers (rules in `scripts/vault.py`: Certificates, Corporate Resume, DNA, ID, Insurance, Medical, Education, Finance & Tax, Property & Home, Vehicle, Travel) by the name printed in them or their face, and `apply.py` copies them into `Family/<Name>/<Folder>/` with folder dates set to their newest paper. Mobile verification, logins and face blurring are part 2 (not built yet): consent and share lists are only recorded for now.
 
 ## If they'd rather do it in this chat
 

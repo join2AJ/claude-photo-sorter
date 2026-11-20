@@ -3,7 +3,7 @@
   python scripts/excel.py                     -> "<sorted folder>/Library details.xlsx" (or work/ before sorting)
   python scripts/excel.py "/path/out.xlsx"
 
-Sheets: Summary, All files, By person, People, Faces, Screenshots, Money, Documents, Videos.
+Sheets: Summary, All files, By person, Family documents, People, Faces, Screenshots, Money, Documents, Videos.
 Faces and people get their picture in the sheet. Ages, genders and emotions are estimates.
 """
 import os, sys
@@ -138,6 +138,24 @@ def build(out, L=None, base=DATA):
         if f:
             link(ws.cell(n, 14), f["path"])
             n += 1
+
+    # ---- Family documents: whose paper, which folder
+    fam = [f for f in files if f.get("vault")]
+    if fam:
+        ws = wb.create_sheet("Family documents")
+        hdr = ["Preview", "Whose", "Person ID", "Folder", "Type", "File", "File ID", "Modified", "Found by", "Company",
+               "Amount", "Sorted copy", "Original file"]
+        name_of = lambda v: people[v["person_id"]]["display"] if v["person_id"] in people else "Not sure whose"
+        fam.sort(key=lambda f: (name_of(f["vault"]) == "Not sure whose", name_of(f["vault"]), f["vault"]["folder_name"], f["modified"] or ""))
+        rows = [["", name_of(f["vault"]), pid(f["vault"]["person_id"]) if f["vault"]["person_id"] else "", f["vault"]["folder_name"],
+                 f["vault"]["sub"], f["name"], f["id"], f["modified"],
+                 {"name": "name in the document", "face": "face in it", "you": "you chose"}.get(f["vault"]["by"], ""),
+                 f["company"], f["amount"], "", ""] for f in fam]
+        table(ws, "FamilyDocs", hdr, rows, [9, 20, 10, 18, 16, 30, 8, 16, 18, 18, 11, 40, 40], style="TableStyleMedium10",
+              pics=[os.path.join(base, "mini", f"{f['id']}.jpg") for f in fam], pic_col=1, row_h=48)
+        for n, f in enumerate(fam, 2):
+            link(ws.cell(n, 12), f["copy"])
+            link(ws.cell(n, 13), f["path"])
 
     # ---- People
     ws = wb.create_sheet("People")
@@ -280,7 +298,7 @@ def build(out, L=None, base=DATA):
 
     for s in wb.worksheets[1:]:
         s.sheet_properties.tabColor = {"All files": "1F2937", "People": ACCENT, "Faces": "B45309", "Screenshots": "2563EB",
-                                       "Money": "15803D", "Documents": "7C3AED", "Videos": "0E7490", "By person": "BE185D"}.get(s.title)
+                                       "Money": "15803D", "Documents": "7C3AED", "Videos": "0E7490", "By person": "BE185D", "Family documents": "A16207"}.get(s.title)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     wb.save(out)
     return out

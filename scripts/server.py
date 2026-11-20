@@ -431,6 +431,9 @@ class H(SimpleHTTPRequestHandler):
             elif p == "/api/merge":
                 merge_people(int(body["into"]), [int(x) for x in body["people"]])
                 return self.send_json({"ok": True})
+            elif p == "/api/vault":
+                set_vault(body)
+                return self.send_json({"ok": True})
             elif p == "/api/face":
                 move_face(int(body["face_id"]), body.get("person_id"))
                 return self.send_json({"ok": True})
@@ -449,9 +452,9 @@ def db_conn():
     import sqlite3
     if not os.path.exists(DB):
         raise ValueError("Sort first: people and details appear after the files have been looked at.")
-    db = sqlite3.connect(DB, timeout=30)
-    db.row_factory = sqlite3.Row
-    return db
+    sys.path.insert(0, SCRIPTS)
+    from analyze import connect
+    return connect()
 
 
 def details_json():
@@ -461,8 +464,10 @@ def details_json():
     for f in L["files"]:
         f["text"] = f["text"][:600]
     people = sorted(L["people"].values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))
+    import vault
+    folders = [{"key": k, "name": n, "what": w} for k, n, w, _ in vault.FOLDERS] + [dict(zip(("key", "name", "what"), vault.OTHER))]
     return {"files": L["files"], "faces": L["faces"], "people": people, "source": L["source"],
-            "categories": L["categories"], "running": job["running"]}
+            "categories": L["categories"], "running": job["running"], "vault_folders": folders}
 
 
 def file_text(i):
@@ -497,6 +502,12 @@ def update_person(b):
             fields["mobile_verified"] = 0  # a new number has to be verified again
     if "notes" in b:
         fields["notes"] = (b["notes"] or "").strip()[:500]
+    if "family" in b:
+        fields["family"] = 1 if b["family"] else 0
+        if b["family"] and not (b.get("name") or cur["name"]):
+            raise ValueError("Give them a name first: their documents are found by name.")
+    if "aliases" in b:
+        fields["aliases"] = (b["aliases"] or "").strip()[:300]
     for k in ("share_with", "hide_from"):
         if k in b:
             fields[k] = ",".join(str(int(x)) for x in b[k] if str(x).isdigit() and int(x) != pid)
@@ -509,6 +520,23 @@ def update_person(b):
     if fields:
         db.execute(f"UPDATE people SET {', '.join(k + '=?' for k in fields)} WHERE person_id=?", [*fields.values(), pid])
         db.commit()
+
+
+def set_vault(b):
+    """You decided whose paper this is (person_id), or that it isn't a family paper (person_id "none")."""
+    inv = load(os.path.join(DATA, "inventory.json"), [])
+    rec = next((r for r in inv if r["id"] == int(b["file_id"])), None)
+    if not rec:
+        raise ValueError("That file is no longer in the library.")
+    db = db_conn()
+    if b.get("person_id") == "auto":
+        db.execute("DELETE FROM vault_overrides WHERE sha256=?", (rec["sha256"],))
+    else:
+        none = b.get("person_id") in ("none", None, "")
+        db.execute("INSERT OR REPLACE INTO vault_overrides (sha256, person_id, folder, not_family, at) VALUES (?,?,?,?,?)",
+                   (rec["sha256"], None if none else int(b["person_id"]), b.get("folder"), 1 if none else 0,
+                    time.strftime("%Y-%m-%d %H:%M:%S")))
+    db.commit()
 
 
 def recompute(db, pid):

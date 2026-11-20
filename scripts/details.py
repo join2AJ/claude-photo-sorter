@@ -5,6 +5,8 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(__file__))
 from common import CATEGORIES, DATA, DB, load
+import vault
+from datetime import datetime
 
 NO_FACE = "un"
 
@@ -24,8 +26,8 @@ def fid(n):
 def connect():
     if not os.path.exists(DB):
         return None
-    db = sqlite3.connect(DB, timeout=30)
-    db.row_factory = sqlite3.Row
+    from analyze import connect as open_db  # also adds columns that older libraries don't have yet
+    db = open_db()
     return db
 
 
@@ -43,11 +45,13 @@ def library():
             for row in csv.DictReader(f):
                 copies[row["original_path"]] = os.path.join(src["sorted"], row["file"])
     db = connect()
-    info, faces, people = {}, [], {}
+    info, faces, people, overrides = {}, [], {}, {}
     if db:
         info = {r["sha256"]: dict(r) for r in db.execute("SELECT * FROM files")}
         people = {r["person_id"]: dict(r) for r in db.execute(
-            "SELECT person_id, name, mobile, mobile_verified, consent, consent_at, share_with, hide_from, notes, created_at FROM people")}
+            "SELECT person_id, name, mobile, mobile_verified, consent, consent_at, share_with, hide_from, notes, created_at, "
+            "family, aliases FROM people")}
+        overrides = {r["sha256"]: dict(r) for r in db.execute("SELECT * FROM vault_overrides")}
         faces = [dict(r) for r in db.execute(
             "SELECT face_id, sha256, frame_s, x, y, w, h, img_w, img_h, score, age, age_years, gender, gender_conf, "
             "emotion, emotion_conf, person_id, manual FROM faces ORDER BY face_id")]
@@ -73,6 +77,8 @@ def library():
             "company": i.get("company") or "", "sector": i.get("sector") or "", "content": i.get("content") or "",
             "amount": i.get("amount"), "currency": i.get("currency") or "", "direction": i.get("direction") or "",
             "txn_ids": i.get("txn_ids") or "", "error": r.get("error") or i.get("error") or "",
+            "plain_bg": i.get("plain_bg"),
+            "modified": i.get("taken") or (datetime.fromtimestamp(r["mtime"]).strftime("%Y-%m-%d %H:%M") if r.get("mtime") else None),
             "analysed": bool(i), "face_ids": [f["face_id"] for f in fs],
             "people_ids": sorted({f["person_id"] for f in fs if f["person_id"]}),
         })
@@ -117,4 +123,8 @@ def library():
         f["file_ids"] = [fl["id"] for fl in file_by_sha.get(f["sha256"], [])]
         f["file"] = file_by_sha.get(f["sha256"], [{}])[0].get("name", "")
         f["person"] = people[f["person_id"]]["display"] if f["person_id"] in people else ""
+    face_by_id = {f["face_id"]: f for f in faces}
+    vmap = vault.assign(files, face_by_id, people, overrides)
+    for f in files:
+        f["vault"] = vmap.get(f["id"])
     return {"files": files, "faces": faces, "people": people, "source": src, "categories": list(cats.values())}

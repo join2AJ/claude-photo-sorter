@@ -104,6 +104,7 @@ function kpis() {
 const TABS = [
   ["all", "Everything", () => D.files.length], ["people", "People", () => D.people.length], ["faces", "Faces", () => D.faces.length],
   ["shots", "Screenshots", () => D.files.filter(f => f.screenshot).length], ["money", "Money", () => D.files.filter(f => f.amount && !f.duplicate_of).length],
+  ["family", "Family", () => D.people.filter(p => p.family).length],
   ["docs", "Documents", () => D.files.filter(f => f.kind === "doc").length], ["videos", "Videos", () => D.files.filter(f => f.kind === "video").length],
 ];
 function tabs() {
@@ -176,7 +177,7 @@ const T = {  // reusable columns
 let renderBody = () => {};
 function render() {
   $("view").replaceChildren();
-  ({ all: viewAll, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
+  ({ all: viewAll, family: viewFamily, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
 }
 function simple(filter, cols, extra = [], note = null) {
   toolbar(extra, note);
@@ -269,11 +270,14 @@ function personDrawer(p) {
   const faces = D.faces.filter(f => f.person_id === p.person_id);
   const files = p.files.map(i => byFile[i]).filter(Boolean);
   const others = D.people.filter(o => o.person_id !== p.person_id && (o.name || o.photos + o.videos > 1)).slice(0, 60);
-  const draft = { name: p.name || "", mobile: p.mobile || "", notes: p.notes || "", consent: p.consent,
+  const draft = { name: p.name || "", mobile: p.mobile || "", notes: p.notes || "", consent: p.consent, family: !!p.family, aliases: p.aliases || "",
     share_with: new Set((p.share_with || "").split(",").filter(Boolean).map(Number)),
     hide_from: new Set((p.hide_from || "").split(",").filter(Boolean).map(Number)) };
   const name = el("input", { class: "field", value: draft.name, placeholder: `Person ${p.person_id}`, oninput: e => draft.name = e.target.value });
   const mobile = el("input", { class: "field", value: draft.mobile, placeholder: "+91 98765 43210", inputmode: "tel", oninput: e => draft.mobile = e.target.value });
+  const family = el("label", { class: "check-line" }, el("input", { type: "checkbox", checked: draft.family, onchange: e => draft.family = e.target.checked }),
+    " Family member: keep their IDs, certificates, insurance and medical papers in their own folders");
+  const aliases = el("input", { class: "field", value: draft.aliases, placeholder: "e.g. AJAY K SHARMA, A. Kumar", oninput: e => draft.aliases = e.target.value });
   const notes = el("input", { class: "field", value: draft.notes, placeholder: "e.g. cousin, office team", oninput: e => draft.notes = e.target.value });
   const consent = el("select", { class: "mx-select", onchange: e => draft.consent = e.target.value },
     [["pending", "Not asked yet (blurred for others)"], ["yes", "Yes, others in the photo may see my face"], ["no", "No, blur my face for others"]]
@@ -287,6 +291,7 @@ function personDrawer(p) {
   const save = async () => {
     try {
       await api("/api/person", { person_id: p.person_id, name: draft.name, mobile: draft.mobile, notes: draft.notes, consent: draft.consent,
+        family: draft.family, aliases: draft.aliases,
         share_with: [...draft.share_with], hide_from: [...draft.hide_from] });
     } catch (e) { return; }
     toast("Saved."); close(); await load();
@@ -310,6 +315,8 @@ function personDrawer(p) {
       el("div", { class: "form" },
         el("label", {}, "Name"), name,
         el("label", {}, "Mobile number"), el("div", {}, mobile, el("p", { class: "hint" }, p.mobile_verified ? "Verified." : "Not verified yet. Verifying by SMS and logging in come with the sharing app (part 2).")),
+        el("label", {}, "Family"), family,
+        el("label", {}, "Names on their documents"), el("div", {}, aliases, el("p", { class: "hint" }, "Their full name above is used too. Use the full name as printed (first name and surname): one first name alone is too easy to mix up.")),
         el("label", {}, "Notes"), notes,
         el("label", {}, "Their face in group photos"), consent,
         el("label", {}, "Show my face to"), chipSet(draft.share_with, ""),
@@ -399,6 +406,7 @@ async function demoApi(path, body) {
     const p = D.people.find(x => x.person_id === body.person_id);
     const mobile = (body.mobile || "").replace(/[\s\-()]/g, "");
     if (mobile && !/^\+?\d{7,15}$/.test(mobile)) { toast("A mobile number has 7 to 15 digits, optionally starting with +."); throw new Error("mobile"); }
+    if (body.family !== !!p.family || (body.aliases || "") !== (p.aliases || "")) toast("Demo: family papers are pre-sorted. In the app, marking family files their papers.");
     Object.assign(p, { name: body.name.trim() || null, mobile: mobile || null, notes: body.notes, consent: body.consent,
       share_with: body.share_with.join(","), hide_from: body.hide_from.join(",") });
     p.display = p.name || `Person ${p.person_id}`;
@@ -412,3 +420,64 @@ async function demoApi(path, body) {
 }
 paintIcons();
 load();
+
+/* ---------- Family: each family member's papers in folders (Certificates, ID, Insurance, Medical...) ---------- */
+const FOLDER_ICON = { certificates: "📜", resume: "💼", dna: "🧬", id: "🪪", insurance: "🛡️", medical: "🩺", education: "🎓",
+  finance: "💰", property: "🏠", vehicle: "🚗", travel: "✈️", other: "📁" };
+const ALWAYS = ["certificates", "resume", "dna", "id", "insurance", "medical"];  // shown even when empty
+const niceDate = s => s ? new Date(s.replace(" ", "T")).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+const newest = fs => fs.map(f => f.modified || "").sort().pop() || "";
+function viewFamily() {
+  const papers = D.files.filter(f => f.vault);
+  const members = D.people.filter(p => p.family);
+  const unsure = papers.filter(f => !f.vault.person_id || !byPerson[f.vault.person_id]);
+  const back = (label, fn) => el("button", { class: "mx-btn ghost small", onclick: fn }, icon("left"), label);
+  toolbar([], el("span", { class: "meta" }, "Found by the name printed in the paper, or the face in it. You can always change whose it is."));
+  $("toolbar").querySelector("input").hidden = !ui.famFolder;
+  renderBody = () => {
+    if (ui.fam == null) {
+      if (!members.length) return $("view").replaceChildren(el("div", { class: "empty-help" },
+        el("h3", {}, "No family members yet"),
+        el("p", { class: "hint" }, "Open a person on the People tab, give their full name (as printed on their documents) and tick Family member. Their IDs, certificates, resume, insurance, medical papers and passport-size photos get their own folders here and in the sorted copies (Family/<Name>/…)."),
+        el("button", { class: "mx-btn solid small", onclick: () => { ui.tab = "people"; remember(); tabs(); render(); } }, "Go to People")));
+      const card = (img, title, sub, n, when, fn) => el("div", { class: "pcard", onclick: fn },
+        img, el("b", {}, title), sub ? el("span", { class: "pid" }, sub) : null,
+        el("span", { class: "stats" }, `${fmt(n)} papers`), when ? el("span", { class: "est" }, `Modified ${niceDate(when)}`) : null);
+      return $("view").replaceChildren(el("div", { class: "people" },
+        members.map(p => { const fs = papers.filter(f => f.vault.person_id === p.person_id);
+          return card(el("img", { src: p.cover ? faceImg(p.cover) : "", alt: "" }), p.name || p.display, pid(p.person_id), fs.length, newest(fs),
+            () => { ui.fam = p.person_id; ui.famFolder = null; renderBody(); }); }),
+        unsure.length ? card(el("div", { class: "folder-ico" }, "❓"), "Not sure whose", "", unsure.length, newest(unsure),
+          () => { ui.fam = "unsure"; ui.famFolder = null; renderBody(); }) : null));
+    }
+    const who = ui.fam === "unsure" ? null : byPerson[ui.fam];
+    const mine = ui.fam === "unsure" ? unsure : papers.filter(f => f.vault.person_id === ui.fam);
+    const title = who ? (who.name || who.display) : "Not sure whose";
+    if (!ui.famFolder) {
+      const keys = D.vault_folders.filter(v => ALWAYS.includes(v.key) || mine.some(f => f.vault.folder === v.key));
+      return $("view").replaceChildren(
+        el("div", { class: "toolbar" }, back("Family", () => { ui.fam = null; renderBody(); }), el("h3", { class: "crumb" }, title)),
+        el("div", { class: "folders" }, keys.map(v => {
+          const fs = mine.filter(f => f.vault.folder === v.key);
+          return el("button", { class: "folder" + (fs.length ? "" : " empty"), onclick: () => { ui.famFolder = v.key; renderBody(); } },
+            el("span", { class: "folder-ico" }, FOLDER_ICON[v.key] || "📁"),
+            el("span", { class: "folder-txt" }, el("b", {}, v.name), el("small", {}, v.what),
+              el("small", { class: "when" }, fs.length ? `${fmt(fs.length)} · Modified ${niceDate(newest(fs))}` : "Empty")));
+        })));
+    }
+    const folder = D.vault_folders.find(v => v.key === ui.famFolder) || { name: "" };
+    const rows = mine.filter(f => f.vault.folder === ui.famFolder && match(f, ui.q));
+    const whose = f => el("select", { class: "mx-select", "aria-label": "Whose is it?", onchange: async e => {
+      try { await api("/api/vault", { file_id: f.id, person_id: e.target.value, folder: f.vault.folder }); } catch (err) { return; }
+      toast("Saved. The sorted copy moves the next time you sort."); await load();
+    } }, el("option", { value: "" }, "Whose is it?"), members.map(p => el("option", { value: p.person_id, selected: f.vault.person_id === p.person_id }, p.name || p.display)),
+      el("option", { value: "none" }, "Not a family paper"), el("option", { value: "auto" }, "Decide automatically"));
+    $("view").replaceChildren(
+      el("div", { class: "toolbar" }, back(title, () => { ui.famFolder = null; renderBody(); }), el("h3", { class: "crumb" }, `${FOLDER_ICON[ui.famFolder] || ""} ${folder.name}`)),
+      ...table(rows, [T.thumb, T.name, { h: "Type", k: "sub", v: f => f.vault.sub, r: f => f.vault.sub },
+        { h: "Modified", k: "modified", r: f => niceDate(f.modified) },
+        { h: "Found by", k: "by", v: f => f.vault.by, r: f => ({ name: "name in it", face: "face in it", you: "you chose" })[f.vault.by] || "" },
+        T.company, T.amount, { h: "Whose", r: whose }]));
+  };
+  renderBody();
+}

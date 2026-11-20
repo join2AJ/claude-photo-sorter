@@ -19,7 +19,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 from common import DATA, DB, load
 
-VERSION = 1
+VERSION = 2  # 2: plain_bg (passport-size photos)
 FACES_DIR = os.path.join(DATA, "faces")
 
 SCHEMA = """
@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS faces (
   emotion TEXT, emotion_conf REAL, person_id INT, manual INT DEFAULT 0);
 CREATE INDEX IF NOT EXISTS faces_sha ON faces(sha256);
 CREATE INDEX IF NOT EXISTS faces_person ON faces(person_id);
+CREATE TABLE IF NOT EXISTS vault_overrides (
+  sha256 TEXT PRIMARY KEY, person_id INT, folder TEXT, not_family INT DEFAULT 0, at TEXT);
 CREATE TABLE IF NOT EXISTS consent_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INT, action TEXT, detail TEXT, at TEXT);
 """
@@ -48,6 +50,9 @@ def connect():
     db = sqlite3.connect(DB, timeout=30)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    for table, col, kind in (("people", "family", "INT DEFAULT 0"), ("people", "aliases", "TEXT"), ("files", "plain_bg", "REAL")):
+        if col not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")  # older libraries: add the new column
     return db
 
 
@@ -240,6 +245,9 @@ def work(rec):
                 f["img_w"], f["img_h"] = img.shape[1], img.shape[0]
                 f["frame_s"] = None
             faces = found
+            if len(found) == 1:  # how plain the background above the face is (passport-size photos are plain)
+                band = cv2.cvtColor(img[: max(4, int(img.shape[0] * 0.08))], cv2.COLOR_BGR2GRAY)
+                row["plain_bg"] = round(float(band.std()), 2)
             row.update({k: v for k, v in meta.items() if not k.startswith("_") and v and not row.get(k)})
             row["is_screenshot"] = int(shot)
             row["tags"] = ", ".join(names)
@@ -333,7 +341,7 @@ class People:
 def save_result(db, people, row, faces):
     cols = ["sha256", "version", "name", "ext", "kind", "bytes", "width", "height", "duration", "taken", "camera", "lens",
             "lat", "lon", "is_screenshot", "tags", "text", "company", "sector", "content", "amount", "currency",
-            "direction", "txn_ids", "face_count", "error", "analysed_at"]
+            "direction", "txn_ids", "face_count", "error", "analysed_at", "plain_bg"]
     row = dict(row, version=VERSION, analysed_at=now())
     db.execute(f"INSERT OR REPLACE INTO files ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                [row.get(c) for c in cols])

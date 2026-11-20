@@ -54,6 +54,9 @@ for k, p in enumerate(people[:6]):  # the six named people: three women, three m
     p.update(gender="female" if k % 2 == 0 else "male", age=rnd.choice([24, 28, 31, 36, 45, 52]))
     p["long"] = p["gender"] == "female"
     p["name"] = NAMES[p["gender"]][k // 2]
+FAMILY = {1: "Verma", 2: "Verma", 3: "Verma", 4: "Verma"}  # made-up family: the first four named people
+for n, surname in FAMILY.items():
+    people[n - 1]["name"] += " " + surname
 REGULAR = people[:16]
 STRANGERS = people[16:]
 EMOTIONS = ["happy"] * 6 + ["neutral"] * 3 + ["surprised", "sad"]
@@ -218,6 +221,34 @@ def money(lo, hi):
     return round(rnd.uniform(lo, hi), 2) if rnd.random() < .5 else float(rnd.randint(lo, hi))
 
 
+def finish(f, im, found, key, kind, when):
+    """Save the pictures and faces of one made-up file and add it to the library."""
+    global i, fid
+    im.save(os.path.join(OUT, "thumbs", f"{i}.jpg"), quality=78)
+    im.resize((72, 72)).save(os.path.join(OUT, "mini", f"{i}.jpg"), quality=72)
+    for p, emo, box, bg in found:
+        fid += 1
+        small = box[2] < 32
+        est_age = max(1, p["age"] + rnd.randint(-6, 6))
+        bucket = next(b for b, hi in (("0-2", 3), ("4-6", 7), ("8-12", 13), ("15-20", 22), ("25-32", 34), ("38-43", 45), ("48-53", 56), ("60+", 200)) if est_age < hi)
+        faces.append({"face_id": fid, "sha256": f["sha256"], "frame_s": round(rnd.uniform(0, f["duration"]), 1) if f["duration"] else None,
+                      "x": box[0], "y": box[1], "w": box[2], "h": box[3], "img_w": 256, "img_h": 256, "score": round(rnd.uniform(.82, .99), 3),
+                      "age": None if small else bucket, "age_years": None if small else est_age,
+                      "gender": None if small else p["gender"], "gender_conf": None if small else round(rnd.uniform(.7, .99), 2),
+                      "emotion": None if small else emo, "emotion_conf": None if small else round(rnd.uniform(.5, .98), 2),
+                      "person_id": p["person_id"], "manual": 0, "file_ids": [i], "file": f["name"]})
+        face_picture(p, emo, bg, os.path.join(OUT, "faces", f"{fid}.jpg"))
+        f["face_ids"].append(fid)
+        if p["person_id"] not in f["people_ids"]:
+            f["people_ids"].append(p["person_id"])
+    f["bytes"] = rnd.randint(20, 90) * 10**6 if kind == "video" else rnd.randint(1, 30) * 10**5 if kind == "doc" else rnd.randint(18, 60) * 10**5
+    inv.append({"id": i, "name": f["name"], "kind": kind, "ext": f["ext"], "bytes": f["bytes"],
+                "duration": f["duration"], "taken": int(when.timestamp())})
+    labels[str(i)] = key
+    files.append(f)
+    i += 1
+
+
 # ---------- build the library ----------
 inv, labels, files, faces = [], {}, [], []
 start = datetime(2023, 1, 1)
@@ -273,29 +304,63 @@ for c in cats:
             if key in ("travel", "city", "food", "vtravel") or rnd.random() < .3:
                 lat, lon = rnd.choice(PLACES)
                 f.update(lat=round(lat + rnd.uniform(-.05, .05), 5), lon=round(lon + rnd.uniform(-.05, .05), 5))
-        im.save(os.path.join(OUT, "thumbs", f"{i}.jpg"), quality=78)
-        im.resize((72, 72)).save(os.path.join(OUT, "mini", f"{i}.jpg"), quality=72)
-        for p, emo, box, bg in found:
-            fid += 1
-            small = box[2] < 32
-            est_age = max(1, p["age"] + rnd.randint(-6, 6))
-            bucket = next(b for b, hi in (("0-2", 3), ("4-6", 7), ("8-12", 13), ("15-20", 22), ("25-32", 34), ("38-43", 45), ("48-53", 56), ("60+", 200)) if est_age < hi)
-            faces.append({"face_id": fid, "sha256": f["sha256"], "frame_s": round(rnd.uniform(0, f["duration"]), 1) if f["duration"] else None,
-                          "x": box[0], "y": box[1], "w": box[2], "h": box[3], "img_w": 256, "img_h": 256, "score": round(rnd.uniform(.82, .99), 3),
-                          "age": None if small else bucket, "age_years": None if small else est_age,
-                          "gender": None if small else p["gender"], "gender_conf": None if small else round(rnd.uniform(.7, .99), 2),
-                          "emotion": None if small else emo, "emotion_conf": None if small else round(rnd.uniform(.5, .98), 2),
-                          "person_id": p["person_id"], "manual": 0, "file_ids": [i], "file": f["name"]})
-            face_picture(p, emo, bg, os.path.join(OUT, "faces", f"{fid}.jpg"))
-            f["face_ids"].append(fid)
-            if p["person_id"] not in f["people_ids"]:
-                f["people_ids"].append(p["person_id"])
-        f["bytes"] = rnd.randint(20, 90) * 10**6 if kind == "video" else rnd.randint(1, 30) * 10**5 if kind == "doc" else rnd.randint(18, 60) * 10**5
-        inv.append({"id": i, "name": f["name"], "kind": kind, "ext": f["ext"], "bytes": f["bytes"],
-                    "duration": f["duration"], "taken": int(when.timestamp())})
-        labels[str(i)] = key
-        files.append(f)
-        i += 1
+        finish(f, im, found, key, kind, when)
+
+# ---------- family papers (made up): each family member's IDs, certificates, insurance, medical... ----------
+PAPERS = [
+    ("Certificate - ISO 27001 Lead Auditor.pdf", "This is to certify that {NAME} has successfully completed ISO 27001 Lead Auditor training"),
+    ("Certificate - Python for security automation.pdf", "Certificate of completion. {NAME} has successfully completed the course"),
+    ("{FIRST} resume - security automation, GRC.docx", "{NAME}\nProfessional summary: security automation, GRC, ISO 27001\nWork experience"),
+    ("Fingerprint record.pdf", "Biometric fingerprint record of {NAME}"),
+    ("Aadhaar.pdf", "Unique Identification Authority of India\n{UPPER}\nAadhaar"),
+    ("PAN card.pdf", "INCOME TAX DEPARTMENT Permanent Account Number card {UPPER}"),
+    ("Passport.pdf", "Republic of India Passport No Z1234567 {UPPER}"),
+    ("Health insurance policy.pdf", "Health insurance policy schedule. Insured: {NAME}. Premium INR 18,400"),
+    ("Term plan.pdf", "Term insurance policy. Life assured {NAME}. Sum assured INR 1,00,00,000"),
+    ("Car insurance.pdf", "Private car package policy. Policyholder {NAME}. Premium INR 12,900"),
+    ("Bike insurance.pdf", "Two wheeler package policy. Insured {NAME}"),
+    ("Prescription.pdf", "Dr. S. Rao Clinic. Patient: {NAME}. Rx Tab. Paracetamol 500 twice daily"),
+    ("Blood test report.pdf", "Laboratory report. Patient {NAME}. Haemoglobin 13.8 g/dL reference range"),
+    ("Hospital invoice.pdf", "City Hospital invoice. Patient {NAME}. Amount INR 8,250"),
+    ("Degree certificate.pdf", "University convocation. Bachelor of Technology awarded to {NAME}"),
+    ("Form 16 {YEAR}.pdf", "Form 16 TDS certificate. Employee {UPPER}"),
+]
+for n in FAMILY:
+    p = people[n - 1]
+    full = p["name"]
+    for tmpl, text in rnd.sample(PAPERS, 11):
+        when = start + timedelta(days=rnd.randint(0, 3 * 365), minutes=rnd.randint(0, 1440))
+        name = tmpl.format(FIRST=full.split()[0], YEAR=when.year)
+        ext = os.path.splitext(name)[1]
+        f = {"id": i, "sha256": f"demo{i}", "kind": "doc", "path": "", "folder": catby["dids"]["label"], "folder_key": "dids",
+             "duplicate_of": "", "copy": "", "taken": when.strftime("%Y-%m-%d %H:%M"), "camera": "", "lens": None, "lat": None, "lon": None,
+             "width": None, "height": None, "duration": None, "screenshot": False, "tags": "", "name": name, "ext": ext,
+             "text": text.format(NAME=full, UPPER=full.upper()) + "\n(made-up demo document)", "company": "", "sector": "",
+             "content": "", "amount": None, "currency": "", "direction": "", "txn_ids": "", "error": "", "analysed": True,
+             "face_ids": [], "people_ids": []}
+        finish(f, paper(ext, name), [], "dids", "doc", when)
+    # a passport-size photo: one face, plain background, portrait
+    when = start + timedelta(days=rnd.randint(0, 3 * 365))
+    im = Image.new("RGB", (256, 256), (236, 240, 246))
+    d = ImageDraw.Draw(im)
+    d.ellipse((128 - 94, 180, 128 + 94, 340), fill=p["shirt"])
+    draw_face(d, 128, 112, 62, p, "neutral")
+    f = {"id": i, "sha256": f"demo{i}", "kind": "photo", "path": "", "folder": catby["selfies"]["label"], "folder_key": "selfies",
+         "duplicate_of": "", "copy": "", "taken": when.strftime("%Y-%m-%d %H:%M"), "camera": "", "lens": None, "lat": None, "lon": None,
+         "width": 413, "height": 531, "duration": None, "screenshot": False, "tags": "", "name": f"Passport photo {full.split()[0]}.jpg",
+         "ext": ".jpg", "text": "", "company": "", "sector": "", "content": "", "amount": None, "currency": "", "direction": "",
+         "txn_ids": "", "error": "", "analysed": True, "face_ids": [], "people_ids": [], "plain_bg": 2.0}
+    finish(f, im, [(p, "neutral", [66, 44, 124, 136], (236, 240, 246))], "selfies", "photo", when)
+for tmpl, text in [("Scanned ID.pdf", "Election Commission of India elector's photo identity card"),
+                   ("Insurance renewal.pdf", "Two wheeler package policy renewal notice"),
+                   ("Lab report.pdf", "Pathology lab report reference range")]:  # papers with no family name in them
+    when = start + timedelta(days=rnd.randint(0, 3 * 365))
+    f = {"id": i, "sha256": f"demo{i}", "kind": "doc", "path": "", "folder": catby["dids"]["label"], "folder_key": "dids",
+         "duplicate_of": "", "copy": "", "taken": when.strftime("%Y-%m-%d %H:%M"), "camera": "", "lens": None, "lat": None, "lon": None,
+         "width": None, "height": None, "duration": None, "screenshot": False, "tags": "", "name": tmpl, "ext": ".pdf",
+         "text": text + "\n(made-up demo document)", "company": "", "sector": "", "content": "", "amount": None, "currency": "",
+         "direction": "", "txn_ids": "", "error": "", "analysed": True, "face_ids": [], "people_ids": []}
+    finish(f, paper(".pdf", tmpl), [], "dids", "doc", when)
 
 dupes = []
 for _ in range(38):  # pretend a few are burst shots
@@ -320,6 +385,7 @@ for p in people:
                 "consent_at": "2025-06-01 10:00:00" if n <= 3 else None,
                 "share_with": "2,3" if n == 1 else "", "hide_from": "4" if n == 3 else "",
                 "notes": "made-up demo person", "created_at": "2025-06-01 09:00:00",
+                "family": 1 if n in FAMILY else 0, "aliases": "",
                 "display": p["name"] if named else f"Person {n}", "photos": 0, "videos": 0, "faces": 0,
                 "first": None, "last": None, "cover": None, "files": [], "_q": -1, "_ages": [], "_g": {}, "_e": {}}
 for fc in faces:
@@ -351,8 +417,16 @@ for f in files:
 for fc in faces:
     fc["person"] = plist[fc["person_id"]]["display"]
 
+import vault
+for f in files:
+    f["modified"] = f["taken"]
+vmap = vault.assign(files, {x["face_id"]: x for x in faces}, plist)
+for f in files:
+    f["vault"] = vmap.get(f["id"])
+VAULT_FOLDERS = [{"key": k, "name": n, "what": w} for k, n, w, _ in vault.FOLDERS] + [dict(zip(("key", "name", "what"), vault.OTHER))]
 source = {"source": "~/Pictures/Camera roll (demo)", "sorted": "~/Pictures/Camera roll (demo) (sorted)"}
 details = {"files": files, "faces": faces, "source": source, "categories": cats, "running": False, "demo": True,
+           "vault_folders": VAULT_FOLDERS,
            "people": sorted(plist.values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))}
 for name, obj in (("inventory.json", inv), ("labels.json", labels), ("dupes.json", dupes), ("categories.json", cats),
                   ("source.json", {"source": source["source"]}), ("details.json", details)):
@@ -365,4 +439,5 @@ try:  # the sample Excel file, from the same made-up data
                 {"files": files, "faces": faces, "people": plist, "source": source, "categories": cats}, base=OUT)
 except ImportError:
     print("  (openpyxl not installed: no demo Excel file)")
-print(f"Demo library: {len(inv)} files, {len(faces)} faces of {len(plist)} people, in dashboard/demo/")
+print(f"Demo library: {len(inv)} files, {len(faces)} faces of {len(plist)} people, "
+      f"{sum(1 for f in files if f['vault'])} family papers, in dashboard/demo/")

@@ -95,3 +95,17 @@ table.dtable { border-collapse: separate; border-spacing: 0; width: 100%; font-s
 }
 .tag.mood { background: var(--accent-tint); color: var(--ink-2); }
 .toolbar .chip-btn { padding-right: 10px; }
+.folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.folder { display: flex; gap: 12px; align-items: flex-start; text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-lg); padding: 14px; color: var(--ink); box-shadow: var(--shadow); transition: transform .15s var(--ease); }
+.folder:hover { transform: translateY(-2px); }
+.folder.empty { opacity: .55; box-shadow: none; }
+.folder-ico { font-size: 28px; line-height: 1; width: 92px; height: 92px; display: grid; place-items: center; }
+.folder .folder-ico { width: auto; height: auto; }
+.folder-txt { display: flex; flex-direction: column; gap: 3px; }
+.folder-txt b { font-size: 14px; }
+.folder-txt small { color: var(--ink-3); font-size: 12px; }
+.folder-txt .when { color: var(--faint); }
+.crumb { margin: 0; font-size: 16px; }
+.check-line { display: flex; gap: 8px; align-items: center; color: var(--ink-2); font-size: 13px; }
+.empty-help { border: 1px dashed var(--border); border-radius: var(--r-lg); padding: 24px; max-width: 640px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.empty-help h3 { margin: 0; }

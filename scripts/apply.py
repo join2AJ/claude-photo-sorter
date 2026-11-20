@@ -49,6 +49,19 @@ for k, v in load(OVERRIDES, {}).items():  # moves made by hand in the dashboard 
         labels[k] = v
 
 save(os.path.join(DATA, "labels.json"), labels)
+
+# family papers go to Family/<Name>/<Folder>/ instead (see vault.py)
+family_dir = {}
+try:
+    import details, vault
+    L = details.library()
+    for f in L["files"]:
+        v = f.get("vault")
+        if v and v["person_id"] in L["people"]:
+            p = L["people"][v["person_id"]]
+            family_dir[f["id"]] = os.path.join("Family", vault.safe(p["name"] or p["display"]), vault.safe(v["folder_name"]))
+except Exception as e:  # never stop the sort over this
+    print(f"  (family folders skipped: {e})", flush=True)
 src_info = load(os.path.join(DATA, "source.json"), {})
 src_info["sorted"] = os.path.abspath(dest)
 save(os.path.join(DATA, "source.json"), src_info)
@@ -82,6 +95,8 @@ with open(os.path.join(dest, "sorted.csv"), "w", newline="") as fc, \
     wd.writerow(["duplicate", "kept_copy", "type", "duplicate_path", "kept_path"])
     for n, r in enumerate(recs, 1):
         folder = cats[labels[str(r["id"])]]["label"].replace("&", "and").replace("/", "-")
+        if r["id"] in family_dir:
+            folder = family_dir[r["id"]]
         if r["id"] in dupe_of:
             g = dupe_of[r["id"]]
             k = byid[g["keep"]]
@@ -101,6 +116,15 @@ with open(os.path.join(dest, "sorted.csv"), "w", newline="") as fc, \
         if n % 500 == 0:
             print(f"  copied {n}/{len(recs)}", flush=True)
 
+# folders show the date of their newest file as "Modified" (like 9 Jan 2021), not today's date
+newest = {}
+for d, _, fs in os.walk(dest, topdown=False):
+    times = [os.path.getmtime(os.path.join(d, f)) for f in fs if not f.endswith(".csv") and not f.endswith(".xlsx")]
+    times += [newest[os.path.join(d, s)] for s in os.listdir(d) if os.path.join(d, s) in newest]
+    if times and d != dest:
+        newest[d] = max(times)
+        os.utime(d, (newest[d], newest[d]))
+
 counts = {}
 for r in recs:
     if r["id"] not in dupe_of:
@@ -109,5 +133,7 @@ print(f"Sorted into {dest}")
 for k, c in cats.items():
     print(f"  {c['label']:24} {counts.get(k, 0)}")
 print(f"  {'_Review/duplicates':24} {len(dupe_of)}")
+if family_dir:
+    print(f"  {'Family':24} {len(family_dir)} papers of {len({p.split(os.sep)[1] for p in family_dir.values()})} people")
 if missing or fixed:
     print(f"  ({missing} files had no label and {fixed} had a wrong-type label; they went to the last folder of their kind)")

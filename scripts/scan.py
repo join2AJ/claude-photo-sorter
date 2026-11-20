@@ -140,7 +140,7 @@ def process(args):
     ext = os.path.splitext(path)[1].lower()
     kind = kind_of(path)
     rec = {"id": i, "path": path, "name": os.path.basename(path), "ext": ext, "kind": kind,
-           "bytes": os.path.getsize(path), "sha256": sha(path)}
+           "bytes": os.path.getsize(path), "mtime": int(os.path.getmtime(path)), "sha256": sha(path)}
     thumb = os.path.join(THUMBS, f"{i}.jpg")
     real_preview = True  # only real previews get a look-alike fingerprint (grey placeholders all look the same)
     try:
