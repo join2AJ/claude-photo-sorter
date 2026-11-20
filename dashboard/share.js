@@ -32,6 +32,7 @@ let th = "light"; try { th = localStorage.getItem("theme") || (matchMedia("(pref
 setTheme(th);
 $("theme").onclick = () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 $("menu").innerHTML = svg("gear");
+if (DEMO) $("test").before(el("a", { class: "owner-link", href: window.STATIC_DEMO ? "details.html" : "details.html?demo", title: "The album owner's library" }, "Owner's view"));
 
 /* ---------- the server, or the demo stand-in ---------- */
 const server = {

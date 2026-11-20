@@ -157,3 +157,4 @@ details.more summary { cursor: pointer; padding: 10px 0; font-weight: 600; font-
 @media (min-width: 760px) { h1 { font-size: 32px; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 .btn svg { width: 20px; height: 20px; flex: none; }
+.owner-link { font-size: 13px; font-weight: 600; color: var(--ink-2); text-decoration: none; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }

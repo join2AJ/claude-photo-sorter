@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Library details</title>
+<title>Library</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7' fill='%23c2412f'/%3E%3Crect x='6' y='6' width='12' height='12' rx='2' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="components.css">
@@ -13,22 +13,27 @@
 <body class="details">
 <header class="topbar">
   <a class="mx-logo" href="./"><i data-icon="images"></i><span class="lbl">photo sorter</span></a>
-  <a class="mx-btn ghost small" href="./"><i data-icon="left"></i><span class="lbl">Sorting</span></a>
+  <nav class="mainnav" aria-label="Main">
+    <a href="./"><i data-icon="sort"></i><span>Sort</span></a>
+    <a href="details.html" aria-current="page"><i data-icon="library"></i><span>Library</span></a>
+    <a href="share.html" title="What the people in your photos see"><i data-icon="share"></i><span>Shar<span class="lbl">ing app</span><span class="phone-only">e</span></span></a>
+  </nav>
   <span class="spacer"></span>
-  <a class="mx-btn ghost small" href="share.html" target="_blank" rel="noopener" title="What the people in your photos see"><span class="lbl">Sharing app ↗</span><span class="phone-only">Share</span></a>
   <button class="mx-icon" id="theme" aria-label="Switch theme"></button>
   <a class="mx-btn solid" id="excel" href="/api/excel"><i data-icon="download"></i><span><span class="lbl">Download </span>Excel</span></a>
 </header>
-<main class="page">
-  <div class="mx-title">
-    <h1>Library details</h1>
-    <span class="mx-sub" id="source"></span>
-  </div>
-  <section class="mx-kpis" id="kpis" style="--n:8"></section>
-  <nav class="tabs" id="tabs" role="tablist"></nav>
-  <div class="toolbar" id="toolbar"></div>
-  <section id="view"></section>
-</main>
+<div class="lib">
+  <nav class="side" id="tabs" aria-label="Library sections"></nav>
+  <main class="page">
+    <div class="mx-title">
+      <h1 id="title">Library</h1>
+      <span class="mx-sub" id="source"></span>
+    </div>
+    <section class="mx-kpis" id="kpis" style="--n:8"></section>
+    <div class="toolbar" id="toolbar"></div>
+    <section id="view"></section>
+  </main>
+</div>
 <div id="overlay"></div>
 <div class="toast" id="toast" role="status"></div>
 <script src="details.js"></script>

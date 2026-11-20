@@ -20,6 +20,21 @@ const el = (tag, attrs = {}, ...kids) => {
   return e;
 };
 const ICONS = {
+  sort: '<path d="M4 20h16"/><path d="m6 16 3-8 3 8"/><path d="M7 13h4"/><path d="M15 8h5l-5 8h5"/>',
+  library: '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/>',
+  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+  home: '<path d="M3 10.2 12 3l9 7.2V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  pulse: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  party: '<path d="M5.8 11.3 2 22l10.7-3.8"/><path d="M4 3h.01"/><path d="M22 8h.01"/><path d="M15 2h.01"/><path d="M22 20h.01"/><path d="M11 13c1.9 1.9 2.8 4.1 2 4.9-.8.8-3-.1-4.9-2-1.9-1.9-2.8-4.1-2-4.9.8-.8 3 .1 4.9 2Z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
+  wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
+  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 12h18"/><path d="M17 3v18"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   images: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
   left: '<path d="m15 18-6-6 6-6"/>', x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
@@ -76,6 +91,7 @@ const whoFeels = f => feelings(f).map(x => `${x.person}: ${EMOJI[x.emotion] || "
 
 async function load() {
   if (DEMO && D.people.length) { indexes(); kpis(); tabs(); render(); return; }  // the demo keeps edits in memory
+  fromHash();
   try { D = DEMO ? await fetch(BASE + "details.json").then(r => r.json()) : await api("/api/details"); }
   catch (e) { $("view").replaceChildren(el("p", { class: "mx-empty" }, "Nothing to show yet. Go back and sort a folder first.")); return; }
   indexes(); D._events = null;
@@ -101,19 +117,58 @@ function kpis() {
   $("kpis").replaceChildren(...items.map(([h, v, s]) => el("div", { class: "mx-kpi" }, el("h3", {}, h), el("b", {}, fmt(v)), el("small", {}, s || " "))));
 }
 
+/* sections: [key, link name (#everything...), label, icon, count, group] */
 const TABS = [
-  ["all", "Everything", () => D.files.length], ["people", "People", () => D.people.length], ["faces", "Faces", () => D.faces.length],
-  ["shots", "Screenshots", () => D.files.filter(f => f.screenshot).length], ["money", "Money", () => D.files.filter(f => f.amount && !f.duplicate_of).length],
-  ["family", "Family", () => D.people.filter(p => p.family).length], ["timeline", "Timeline", () => D.people.filter(p => p.name).length],
-  ["events", "Events", () => events().length], ["search", "Face search", () => ""],
-  ["requests", "Requests", () => (D.requests || []).filter(r => r.status === "pending").length + (D.alerts || []).filter(a => !a.seen).length || ""],
-  ["docs", "Documents", () => D.files.filter(f => f.kind === "doc").length], ["videos", "Videos", () => D.files.filter(f => f.kind === "video").length],
+  ["all", "everything", "Everything", "grid", () => D.files.length, "Library"],
+  ["shots", "screenshots", "Screenshots", "phone", () => D.files.filter(f => f.screenshot).length, "Library"],
+  ["money", "money", "Money", "wallet", () => D.files.filter(f => f.amount && !f.duplicate_of).length, "Library"],
+  ["docs", "documents", "Documents", "file", () => D.files.filter(f => f.kind === "doc").length, "Library"],
+  ["videos", "videos", "Videos", "film", () => D.files.filter(f => f.kind === "video").length, "Library"],
+  ["people", "people", "People", "users", () => D.people.length, "People"],
+  ["faces", "faces", "Faces", "scan", () => D.faces.length, "People"],
+  ["family", "family", "Family", "home", () => D.people.filter(p => p.family).length, "People"],
+  ["timeline", "timeline", "Timeline", "pulse", () => D.people.filter(p => p.name).length, "People"],
+  ["events", "events", "Events", "party", () => events().length, "People"],
+  ["search", "face-search", "Face search", "search", () => "", "People"],
+  ["requests", "requests", "Requests & alerts", "bell", () => (D.requests || []).filter(r => r.status === "pending").length + (D.alerts || []).filter(a => !a.seen).length || "", "Sharing"],
 ];
+const TAB = Object.fromEntries(TABS.map(t => [t[0], t]));
 function tabs() {
-  $("tabs").replaceChildren(...TABS.map(([k, label, n]) => el("button", { role: "tab", "aria-selected": ui.tab === k, onclick: () => {
-    Object.assign(ui, { tab: k, sort: null, desc: false, shown: 200, q: "" }); remember(); tabs(); render();
-  } }, label, n() === "" ? null : el("em", {}, fmt(n())))));
+  const groups = [...new Set(TABS.map(t => t[5]))];
+  $("tabs").replaceChildren(...groups.map(g => el("div", { class: "side-group" }, el("h4", {}, g),
+    TABS.filter(t => t[5] === g).map(([k, slug, label, ic, n]) => {
+      const c = n();
+      return el("a", { href: "#" + slug, class: "side-item" + (k === "requests" && c ? " alert" : ""), "aria-current": ui.tab === k ? "page" : false, onclick: e => {
+        e.preventDefault();
+        Object.assign(ui, { tab: k, sort: null, desc: false, shown: 200, q: "", fam: null, ev: null }); remember(); tabs(); render();
+        document.querySelector(".side-item[aria-current]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      } }, icon(ic), el("span", { class: "side-label" }, label), c === "" ? null : el("em", {}, fmt(c)));
+    }))),
+    el("div", { class: "side-group side-links" }, el("h4", {}, "Also"),
+      el("a", { class: "side-item", href: "share.html", target: "_blank", rel: "noopener" }, icon("share"), el("span", { class: "side-label" }, "Open the sharing app"), el("em", {}, "↗")),
+      el("a", { class: "side-item", href: "./" }, icon("sort"), el("span", { class: "side-label" }, "Sort more photos"))));
+  $("title").textContent = TAB[ui.tab] ? TAB[ui.tab][2] : "Library";
+  document.title = `${$("title").textContent} · Library`;
+  paintIcons($("tabs"));
 }
+
+/* links: #everything, #family/3, #timeline/5, #events/0 ... the back button and bookmarks work */
+const SUB = { family: "fam", timeline: "tl", events: "ev" };
+function hashFor() {
+  const t = TAB[ui.tab]; if (!t) return "";
+  const sub = SUB[ui.tab] && ui[SUB[ui.tab]] != null ? "/" + ui[SUB[ui.tab]] : "";
+  return "#" + t[1] + sub;
+}
+function setHash() { const h = hashFor(); if (h && location.hash !== h) history.pushState(null, "", h); }
+function fromHash() {
+  const [slug, sub] = decodeURIComponent(location.hash.slice(1)).split("/");
+  const t = TABS.find(x => x[1] === slug);
+  if (!t) return false;
+  ui.tab = t[0];
+  if (SUB[ui.tab]) ui[SUB[ui.tab]] = sub == null || sub === "" ? null : sub === "unsure" ? "unsure" : +sub;
+  return true;
+}
+addEventListener("popstate", () => { if (fromHash() && D.files.length) { remember(); tabs(); render(); } });
 
 /* ---------- toolbar ---------- */
 function toolbar(extra = [], note = null) {
@@ -181,6 +236,8 @@ const T = {  // reusable columns
 let renderBody = () => {};
 function render() {
   $("view").replaceChildren();
+  $("kpis").hidden = !["all", "shots", "money", "docs", "videos"].includes(ui.tab);
+  if (!SUB[ui.tab]) setHash();
   ({ all: viewAll, family: viewFamily, timeline: viewTimeline, events: viewEvents, search: viewFaceSearch, requests: viewRequests, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
 }
 function simple(filter, cols, extra = [], note = null) {
@@ -454,6 +511,7 @@ function viewFamily() {
   ui.open = ui.open || {};
   toolbar([], el("span", { class: "meta" }, "Papers are found by the name printed in them or the face in them; photos they're in are added to 2. Photos. You can change whose a paper is."));
   renderBody = () => {
+    setHash();
     if (ui.fam == null) {
       if (!members.length) return $("view").replaceChildren(el("div", { class: "empty-help" },
         el("h3", {}, "No family members yet"),
@@ -580,6 +638,7 @@ function viewTimeline() {
     people.map(p => el("option", { value: p.person_id, selected: p.person_id === ui.tl }, `${p.display} · ${pid(p.person_id)}`)));
   toolbar([sel], el("span", { class: "meta" }, "From the date, place and phone saved in each photo. Moods are estimates."));
   $("toolbar").querySelector("input").hidden = true;
+  setHash();
   const p = byPerson[ui.tl];
   if (!p) return $("view").replaceChildren(el("p", { class: "mx-empty" }, "No people yet."));
   const files = p.files.map(i => byFile[i]).filter(f => f && f.taken).sort((a, b) => a.taken.localeCompare(b.taken));
@@ -756,6 +815,7 @@ function viewEvents() {
   $("toolbar").querySelector("input").hidden = true;
   const moodSeries = MOODS.map(([k, e], i) => [k, `${e} ${k}`, `series-${i + 1}`]);
   renderBody = () => {
+    setHash();
     if (ui.ev == null || !evs[ui.ev]) {
       if (!evs.length) return $("view").replaceChildren(el("p", { class: "mx-empty" }, "No events found yet: an event needs at least 6 photos taken close together with 3 or more people."));
       return $("view").replaceChildren(el("div", { class: "events" }, evs.map((ev, i) => {

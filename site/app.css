@@ -203,3 +203,16 @@ input, textarea, select { font: 13px var(--font); }
 }
 .phone-only { display: none; }
 @media (max-width: 640px) { .topbar .phone-only { display: inline; } }
+/* main navigation, the same on every owner page */
+a.mx-logo { text-decoration: none; color: inherit; }
+.mainnav { display: flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--tone-40); border: 1px solid var(--hair); margin-left: 6px; }
+.mainnav a { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 9px; color: var(--ink-3); font-weight: 600; font-size: 13px; text-decoration: none; transition: background .15s, color .15s; }
+.mainnav a:hover { color: var(--ink); }
+.mainnav a[aria-current="page"] { background: var(--paper); color: var(--ink); box-shadow: var(--shadow); }
+.mainnav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mainnav [data-icon] svg { width: 14px; height: 14px; }
+@media (max-width: 640px) {
+  .mainnav { margin-left: 0; }
+  .mainnav a { padding: 0 9px; }
+  .mainnav [data-icon] { display: none; }
+}

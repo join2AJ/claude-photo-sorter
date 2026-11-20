@@ -11,11 +11,15 @@
 </head>
 <body>
 <header class="topbar">
-  <span class="mx-logo"><i data-icon="images"></i><span class="lbl">photo sorter</span></span>
+  <a class="mx-logo" href="./"><i data-icon="images"></i><span class="lbl">photo sorter</span></a>
+  <nav class="mainnav" aria-label="Main">
+    <a href="./" aria-current="page"><i data-icon="sort"></i><span>Sort</span></a>
+    <a href="details.html"><i data-icon="library"></i><span>Library</span></a>
+    <a href="share.html" title="What the people in your photos see"><i data-icon="share"></i><span>Shar<span class="lbl">ing app</span><span class="phone-only">e</span></span></a>
+  </nav>
   <span class="mx-pill" id="pill"><span class="dot"></span><span id="pilltext">Loading</span></span>
   <span class="spacer"></span>
   <button class="mx-icon" id="theme" aria-label="Switch to dark mode"></button>
-  <button class="mx-btn" id="btnDetails"><i data-icon="table"></i><span class="lbl">Details &amp; people</span></button>
   <button class="mx-btn" id="btnNew" hidden><i data-icon="plus"></i><span class="lbl">New sort</span></button>
   <button class="mx-btn solid" id="go"><i data-icon="play"></i><span class="lbl">Start sorting</span></button>
 </header>
