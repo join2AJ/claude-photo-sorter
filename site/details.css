@@ -93,3 +93,5 @@ table.dtable { border-collapse: separate; border-spacing: 0; width: 100%; font-s
   .form { grid-template-columns: 1fr; }
   .page { padding: 14px 16px 40px; }
 }
+.tag.mood { background: var(--accent-tint); color: var(--ink-2); }
+.toolbar .chip-btn { padding-right: 10px; }

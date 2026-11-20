@@ -3,7 +3,7 @@
   python scripts/excel.py                     -> "<sorted folder>/Library details.xlsx" (or work/ before sorting)
   python scripts/excel.py "/path/out.xlsx"
 
-Sheets: Summary, All files, People, Faces, Screenshots, Money, Documents, Videos.
+Sheets: Summary, All files, By person, People, Faces, Screenshots, Money, Documents, Videos.
 Faces and people get their picture in the sheet. Ages, genders and emotions are estimates.
 """
 import os, sys
@@ -71,6 +71,12 @@ def table(ws, name, headers, rows, widths, style="TableStyleMedium2", pics=None,
     return ws
 
 
+def mood(fs):
+    """The most common estimated emotion among these faces ('' when none was clear enough)."""
+    c = Counter(x["emotion"] for x in fs if x["emotion"])
+    return max(c.items(), key=lambda kv: (kv[1], kv[0] == "happy"))[0] if c else ""
+
+
 def build(out, L=None, base=DATA):
     """L: a library() dict (the demo passes its own); base: where the mini/ and faces/ pictures are."""
     L = L or library()
@@ -80,8 +86,8 @@ def build(out, L=None, base=DATA):
     # ---- All files
     ws = wb.active
     ws.title = "All files"
-    hdr = ["Preview", "File ID", "Name", "Type", "Folder", "Date taken", "Camera / phone", "People in it", "Person IDs",
-           "Face IDs", "Faces", "Ages (est.)", "Genders (est.)", "Emotions (est.)", "Things in it", "Screenshot",
+    hdr = ["Preview", "File ID", "Name", "Type", "Folder", "Date taken", "Camera / phone", "People in it", "Mood (est.)",
+           "Who feels what (est.)", "Person IDs", "Face IDs", "Faces", "Ages (est.)", "Genders (est.)", "Emotions (est.)", "Things in it", "Screenshot",
            "Company / app", "Kind of content", "Amount", "Currency", "Money in/out", "Transaction / order IDs",
            "Size (MB)", "Width", "Height", "Length (s)", "GPS", "Duplicate of", "Original file", "Sorted copy"]
     face_by_id = {f["face_id"]: f for f in faces}
@@ -89,24 +95,49 @@ def build(out, L=None, base=DATA):
     for f in files:
         fs = [face_by_id[i] for i in f["face_ids"] if i in face_by_id]
         rows.append(["", f["id"], f["name"], f["kind"], f["folder"], f["taken"], f["camera"], f["people"],
-                     ", ".join(pid(i) for i in f["people_ids"]) or NO_FACE, ", ".join(fid(i) for i in f["face_ids"]),
+                     mood(fs), ", ".join(f"{x['person']}: {x['emotion']}" for x in fs if x["emotion"]), ", ".join(pid(i) for i in f["people_ids"]) or NO_FACE, ", ".join(fid(i) for i in f["face_ids"]),
                      len(f["face_ids"]), ", ".join(x["age"] or "?" for x in fs), ", ".join(x["gender"] or "?" for x in fs),
                      ", ".join(x["emotion"] or "?" for x in fs), f["tags"], "yes" if f["screenshot"] else "",
                      f["company"], f["content"], f["amount"], f["currency"], f["direction"], f["txn_ids"],
                      mb(f["bytes"]), f["width"], f["height"], round(f["duration"], 1) if f["duration"] else None,
                      f"{f['lat']:.5f}, {f['lon']:.5f}" if f["lat"] is not None else "", f["duplicate_of"], "", ""])
         pics.append(os.path.join(base, "mini", f"{f['id']}.jpg"))
-    table(ws, "AllFiles", hdr, rows, [9, 8, 28, 8, 22, 16, 18, 30, 16, 18, 7, 14, 14, 16, 30, 10, 20, 18, 11, 9, 10, 26,
+    table(ws, "AllFiles", hdr, rows, [9, 8, 28, 8, 22, 16, 18, 30, 14, 34, 16, 18, 7, 14, 14, 16, 30, 10, 20, 18, 11, 9, 10, 26,
                                       9, 7, 7, 9, 20, 20, 40, 40], pics=pics, pic_col=1, row_h=48)
     for n, f in enumerate(files, 2):
-        link(ws.cell(n, 29), f["path"])
-        link(ws.cell(n, 30), f["copy"])
+        link(ws.cell(n, 31), f["path"])
+        link(ws.cell(n, 32), f["copy"])
         if f["lat"] is not None:
-            link(ws.cell(n, 27), None)
-            ws.cell(n, 27).value = f"{f['lat']:.5f}, {f['lon']:.5f}"
-            ws.cell(n, 27).hyperlink = f"https://maps.google.com/?q={f['lat']},{f['lon']}"
-            ws.cell(n, 27).font = LINK
-        ws.cell(n, 19).number_format = "#,##0.00"
+            ws.cell(n, 29).value = f"{f['lat']:.5f}, {f['lon']:.5f}"
+            ws.cell(n, 29).hyperlink = f"https://maps.google.com/?q={f['lat']},{f['lon']}"
+            ws.cell(n, 29).font = LINK
+        ws.cell(n, 21).number_format = "#,##0.00"
+
+    # ---- By person: one row per person per photo, to filter by a name
+    ws = wb.create_sheet("By person")
+    byfile = {f["id"]: f for f in files}
+    hdr = ["Face", "Name", "Person ID", "Registered", "File", "File ID", "Type", "Date", "Their emotion (est.)",
+           "Photo mood (est.)", "Others in it", "Folder", "Face ID", "Original file"]
+    rows, pics = [], []
+    for x in sorted(faces, key=lambda x: (x["person"], x["file"])):
+        p = people.get(x["person_id"], {})
+        for i in x["file_ids"][:1]:
+            f = byfile.get(i)
+            if not f:
+                continue
+            fs = [face_by_id[j] for j in f["face_ids"] if j in face_by_id]
+            rows.append(["", x["person"], pid(x["person_id"]) if x["person_id"] else "", "yes" if p.get("name") else "no",
+                         f["name"], f["id"], f["kind"], f["taken"], x["emotion"] or "too small", mood(fs),
+                         ", ".join(y["person"] for y in fs if y["person_id"] != x["person_id"]), f["folder"], fid(x["face_id"]), ""])
+            pics.append(os.path.join(base, "faces", f"{x['face_id']}.jpg"))
+    table(ws, "ByPerson", hdr, rows, [9, 18, 10, 10, 28, 8, 8, 16, 16, 16, 34, 22, 10, 40], style="TableStyleMedium7",
+          pics=pics, pic_col=1, row_h=48)
+    n = 2
+    for x in sorted(faces, key=lambda x: (x["person"], x["file"])):
+        f = byfile.get((x["file_ids"] or [None])[0])
+        if f:
+            link(ws.cell(n, 14), f["path"])
+            n += 1
 
     # ---- People
     ws = wb.create_sheet("People")
@@ -249,7 +280,7 @@ def build(out, L=None, base=DATA):
 
     for s in wb.worksheets[1:]:
         s.sheet_properties.tabColor = {"All files": "1F2937", "People": ACCENT, "Faces": "B45309", "Screenshots": "2563EB",
-                                       "Money": "15803D", "Documents": "7C3AED", "Videos": "0E7490"}.get(s.title)
+                                       "Money": "15803D", "Documents": "7C3AED", "Videos": "0E7490", "By person": "BE185D"}.get(s.title)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     wb.save(out)
     return out

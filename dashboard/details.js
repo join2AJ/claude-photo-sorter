@@ -52,9 +52,27 @@ $("theme").onclick = () => setTheme(document.documentElement.dataset.theme === "
 
 /* ---------- data ---------- */
 let D = { files: [], faces: [], people: [] }, byFile = {}, byPerson = {}, byFace = {};
-const ui = { tab: "all", q: "", sort: null, desc: false, shown: 200, kind: "", minPhotos: 1, merge: null };
+const ui = { tab: "all", q: "", sort: null, desc: false, shown: 200, kind: "", minPhotos: 1, merge: null, who: [], mood: "" };
 try { Object.assign(ui, JSON.parse(sessionStorage.getItem("details-ui") || "{}"), { merge: null, shown: 200 }); } catch (e) {}
-const remember = () => { try { sessionStorage.setItem("details-ui", JSON.stringify({ tab: ui.tab, minPhotos: ui.minPhotos })); } catch (e) {} };
+const remember = () => { try { sessionStorage.setItem("details-ui", JSON.stringify({ tab: ui.tab, minPhotos: ui.minPhotos, who: ui.who, mood: ui.mood })); } catch (e) {} };
+
+/* ---------- moods: estimated emotions per face, summed up per photo ---------- */
+const EMOJI = { happy: "😊", neutral: "😐", surprised: "😮", sad: "😢", angry: "😠", disgusted: "🤢", scared: "😨", contempt: "😒" };
+function feelings(f) { return f.face_ids.map(i => byFace[i]).filter(x => x && x.emotion); }
+function mood(f) {  // the most common emotion among the faces in this file (estimated)
+  const fs = feelings(f);
+  if (!fs.length) return "";
+  const n = {};
+  fs.forEach(x => n[x.emotion] = (n[x.emotion] || 0) + 1);
+  return Object.entries(n).sort((a, b) => b[1] - a[1] || (a[0] === "happy" ? -1 : 1))[0][0];
+}
+function moodTag(f) {
+  const m = mood(f), fs = feelings(f);
+  if (!m) return f.face_ids.length ? el("span", { class: "tag un" }, "faces too small") : "";
+  const k = fs.filter(x => x.emotion === m).length;
+  return el("span", { class: "tag mood", title: "Estimated by a computer model" }, `${EMOJI[m] || ""} ${m}${fs.length > 1 ? ` (${k} of ${fs.length})` : ""}`);
+}
+const whoFeels = f => feelings(f).map(x => `${x.person}: ${EMOJI[x.emotion] || ""} ${x.emotion}`).join(" · ");
 
 async function load() {
   if (DEMO && D.people.length) { indexes(); kpis(); tabs(); render(); return; }  // the demo keeps edits in memory
@@ -138,6 +156,8 @@ const T = {  // reusable columns
   people: { h: "People", k: "people", r: f => f.people === "un" ? el("span", { class: "tag un" }, "un") : f.people_ids.map(i => el("span", { class: "tag" }, personName(i))) },
   pids: { h: "Person IDs", k: "pids", v: f => f.people_ids.join(","), r: f => f.people_ids.length ? f.people_ids.map(pid).join(", ") : "un" },
   fids: { h: "Face IDs", k: "fids", v: f => f.face_ids.length, r: f => f.face_ids.map(fid).join(", ") },
+  mood: { h: "Mood (est.)", k: "mood", v: f => mood(f), r: moodTag },
+  feels: { h: "Who feels what (est.)", k: "feels", v: whoFeels, r: whoFeels },
   ests: { h: "Age · gender · emotion (est.)", r: f => f.face_ids.map(i => byFace[i]).filter(x => x && x.age).map(x => `${x.age} ${x.gender || ""} ${x.emotion || ""}`).join(" | ") },
   tags: { h: "Things in it", k: "tags" },
   company: { h: "Company / app", k: "company" },
@@ -163,15 +183,34 @@ function simple(filter, cols, extra = [], note = null) {
   renderBody = () => $("view").replaceChildren(...table(D.files.filter(f => filter(f) && match(f, ui.q)), cols));
   renderBody();
 }
+/* filters shared by Everything and Videos: people in the photo (all of them) and mood */
+const filterPeopleMood = f => ui.who.every(id => f.people_ids.includes(id)) &&
+  (!ui.mood || (ui.mood === "un" ? !f.face_ids.length : feelings(f).some(x => x.emotion === ui.mood)));
+function peopleMoodControls() {
+  const known = D.people.filter(p => (p.name || p.photos + p.videos > 1) && !ui.who.includes(p.person_id))
+    .sort((a, b) => (!!b.name - !!a.name) || (b.photos + b.videos) - (a.photos + a.videos));
+  const add = el("select", { class: "mx-select", "aria-label": "Show photos of a person", onchange: e => {
+    if (e.target.value) { ui.who.push(+e.target.value); ui.shown = 200; remember(); render(); }
+  } }, el("option", { value: "" }, ui.who.length ? "+ and also…" : "Photos of… (pick a person)"),
+    known.map(p => el("option", { value: p.person_id }, `${p.display} · ${pid(p.person_id)} (${p.photos + p.videos})`)));
+  const chips = ui.who.map(id => el("button", { class: "chip-btn", "aria-pressed": "true", title: "Remove", onclick: () => {
+    ui.who = ui.who.filter(x => x !== id); remember(); render();
+  } }, el("img", { src: byPerson[id] && byPerson[id].cover ? faceImg(byPerson[id].cover) : "", alt: "" }), personName(id) || pid(id), " ✕"));
+  const moods = el("select", { class: "mx-select", "aria-label": "Mood", onchange: e => { ui.mood = e.target.value; remember(); renderBody(); } },
+    [["", "Any mood"], ...Object.keys(EMOJI).map(k => [k, `${EMOJI[k]} someone ${k}`]), ["un", "No face (un)"]]
+      .map(([v, t]) => el("option", { value: v, selected: ui.mood === v }, t)));
+  return [add, ...chips, moods];
+}
 function viewAll() {
   const kind = el("select", { class: "mx-select", "aria-label": "Type", onchange: e => { ui.kind = e.target.value; renderBody(); } },
     [["", "All types"], ["photo", "Photos"], ["video", "Videos"], ["doc", "Documents"]].map(([v, t]) => el("option", { value: v, selected: ui.kind === v }, t)));
-  simple(f => !ui.kind || f.kind === ui.kind, [T.thumb, T.id, T.name, T.kind, T.folder, T.taken, T.people, T.pids, T.fids, T.ests, T.tags, T.company, T.content, T.amount, T.camera, T.size, T.gps, T.dup],
-    [kind], el("span", { class: "meta" }, "\"un\" means no face was found. Click a picture to see everything about it."));
+  simple(f => (!ui.kind || f.kind === ui.kind) && filterPeopleMood(f),
+    [T.thumb, T.id, T.name, T.kind, T.folder, T.taken, T.people, T.mood, T.feels, T.pids, T.fids, T.ests, T.tags, T.company, T.content, T.amount, T.camera, T.size, T.gps, T.dup],
+    [kind, ...peopleMoodControls()], el("span", { class: "meta" }, ui.who.length > 1 ? "Showing photos with all of these people together." : "Moods are estimates. \"un\" means no face was found."));
 }
 function viewShots() { simple(f => f.screenshot, [T.thumb, T.id, T.name, T.taken, T.company, { h: "Sector", k: "sector" }, T.content, T.amount, T.txn, T.tags, T.text, T.folder]); }
 function viewDocs() { simple(f => f.kind === "doc", [T.thumb, T.id, T.name, { h: "Type", k: "ext" }, T.content, T.company, T.amount, T.txn, T.size, T.folder, T.text]); }
-function viewVideos() { simple(f => f.kind === "video", [T.thumb, T.id, T.name, T.taken, T.length, T.camera, T.people, T.pids, T.tags, T.size, T.folder, T.gps]); }
+function viewVideos() { simple(f => f.kind === "video" && filterPeopleMood(f), [T.thumb, T.id, T.name, T.taken, T.length, T.camera, T.people, T.mood, T.feels, T.pids, T.tags, T.size, T.folder, T.gps], peopleMoodControls()); }
 function viewMoney() {
   const rows = () => D.files.filter(f => f.amount && !f.duplicate_of && match(f, ui.q));
   const sums = el("span", { class: "meta" });
@@ -279,7 +318,8 @@ function personDrawer(p) {
       el("div", { class: "toolbar" }, el("button", { class: "mx-btn solid", onclick: save }, "Save"), el("button", { class: "mx-btn ghost", onclick: () => close() }, "Cancel")),
       el("h3", {}, `Faces (${faces.length})`), el("p", { class: "hint" }, "A face that isn't them? Use its menu to move it."),
       el("div", { class: "faces" }, faces.slice(0, 120).map(faceRow)),
-      el("h3", {}, `Photos & videos (${files.length})`),
+      el("div", { class: "toolbar" }, el("h3", {}, `Photos & videos (${files.length})`), el("span", { class: "spacer" }),
+        el("button", { class: "mx-btn small", onclick: () => { close(); Object.assign(ui, { tab: "all", who: [p.person_id], mood: "", q: "", shown: 200 }); remember(); tabs(); render(); scrollTo(0, 0); } }, "Show in the table")),
       el("div", { class: "photos" }, files.slice(0, 300).map(f => el("img", { src: thumb(f), alt: f.name, loading: "lazy", onclick: () => viewer(f) })))));
   function close() { scrim.remove(); }
   $("overlay").replaceChildren(scrim); paintIcons(scrim); name.focus();
@@ -289,15 +329,17 @@ function personDrawer(p) {
 function viewFaces() {
   const sel = el("select", { class: "mx-select", "aria-label": "Person", onchange: e => { ui.person = e.target.value; renderBody(); } },
     el("option", { value: "" }, "Everyone"), D.people.filter(p => p.faces > 1 || p.name).map(p => el("option", { value: p.person_id, selected: String(ui.person) === String(p.person_id) }, `${p.display} (${p.faces})`)));
-  toolbar([sel], el("span", { class: "meta" }, "Every face has its own number (F…). Faces of one person share a person number (P…)."));
+  const moods = el("select", { class: "mx-select", "aria-label": "Emotion", onchange: e => { ui.mood = e.target.value; renderBody(); } },
+    [["", "Any emotion"], ...Object.keys(EMOJI).map(k => [k, `${EMOJI[k]} ${k}`])].map(([v, t]) => el("option", { value: v, selected: ui.mood === v }, t)));
+  toolbar([sel, moods], el("span", { class: "meta" }, "Every face has its own number (F…). Faces of one person share a person number (P…). Emotions are estimates."));
   renderBody = () => {
-    const list = D.faces.filter(f => (!ui.person || String(f.person_id) === String(ui.person)) &&
+    const list = D.faces.filter(f => (!ui.person || String(f.person_id) === String(ui.person)) && (!ui.mood || ui.mood === "un" || f.emotion === ui.mood) &&
       (!ui.q || `${fid(f.face_id)} ${pid(f.person_id)} ${f.person} ${f.file} ${f.emotion} ${f.gender} ${f.age}`.toLowerCase().includes(ui.q.toLowerCase())));
     $("view").replaceChildren(el("div", { class: "faces" }, list.slice(0, ui.shown).map(f => el("div", { class: "fcard" },
       el("img", { src: faceImg(f.face_id), alt: "", loading: "lazy", onclick: () => byFile[f.file_ids[0]] && viewer(byFile[f.file_ids[0]]) }),
       el("span", { class: "fid" }, `${fid(f.face_id)} · ${pid(f.person_id)}`),
       el("b", {}, f.person),
-      el("span", {}, f.age ? `${f.age} · ${f.gender} · ${f.emotion}` : "small face")))),
+      el("span", {}, f.age ? `${f.age} · ${f.gender} · ${EMOJI[f.emotion] || ""} ${f.emotion}` : "small face")))),
       list.length > ui.shown ? el("div", { class: "more-row" }, el("button", { class: "mx-btn small", onclick: () => { ui.shown += 400; renderBody(); } }, "Show more")) : "");
   };
   renderBody();
@@ -325,7 +367,7 @@ async function viewer(f) {
       row("Type", f.kind + (f.screenshot ? " (screenshot)" : "")), row("Folder", f.folder), row("Date", f.taken), row("Camera", f.camera),
       row("Size", `${size(f.bytes)}${f.width ? ` · ${f.width}×${f.height}` : ""}${f.duration ? ` · ${Math.round(f.duration)} s` : ""}`),
       row("GPS", f.lat != null ? el("a", { href: `https://maps.google.com/?q=${f.lat},${f.lon}`, target: "_blank", rel: "noopener" }, `${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}`) : ""),
-      row("People", f.people), row("Things in it", f.tags), row("Company / app", f.company), row("What it is", f.content),
+      row("People", f.people), row("Mood (est.)", mood(f) ? `${EMOJI[mood(f)] || ""} ${mood(f)}` : ""), row("Who feels what", whoFeels(f)), row("Things in it", f.tags), row("Company / app", f.company), row("What it is", f.content),
       row("Amount", f.amount != null ? `${f.direction === "out" ? "paid " : f.direction === "in" ? "received " : ""}${money(f.amount)} ${f.currency}` : ""),
       row("IDs", f.txn_ids), row("Duplicate of", f.duplicate_of)),
     faces.length ? el("h3", {}, `Faces (${faces.length})`) : null,

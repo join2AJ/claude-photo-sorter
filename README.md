@@ -60,7 +60,7 @@ Press **New sort** to sort a different folder. People you named are remembered, 
 | | |
 |---|---|
 | **Start sorting / Replay** | Before sorting: asks for anything missing, then starts. After sorting: replays the animation (good for screen recording). Add `?d=20` to the address for a slower take. |
-| **Details & people** | Everything it found, in tabs: Everything, People, Faces, Screenshots, Money, Documents, Videos. Search, sort any column, click a picture to see it with every face marked and named. |
+| **Details & people** | Everything it found, in tabs: Everything, People, Faces, Screenshots, Money, Documents, Videos. Search, sort any column, click a picture to see it with every face marked and named. Pick one or more people to see only photos with all of them together, and filter by mood (happy, sad, surprised…). |
 | **People** (in Details) | Click someone to name them, add their mobile number, set whether others may see their face in group photos, and choose who to show or hide their face from. Move a wrong face to the right person, or **Merge people** when one person was split in two. |
 | **Download Excel** | The whole library as a formatted Excel file. A copy is also saved in the sorted folder as `Library details.xlsx`. |
 | **Advanced** (in the setup card) | See and change the folders. Choose who picks the folders: **This computer** (free, default), Claude, or Jev. Try 200 files first. |
