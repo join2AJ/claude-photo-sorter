@@ -58,7 +58,9 @@ def connect():
     db = sqlite3.connect(DB, timeout=30)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
-    for table, col, kind in (("people", "family", "INT DEFAULT 0"), ("people", "aliases", "TEXT"), ("files", "plain_bg", "REAL"), ("files", "colors", "TEXT")):
+    for table, col, kind in (("people", "family", "INT DEFAULT 0"), ("people", "aliases", "TEXT"), ("files", "plain_bg", "REAL"), ("files", "colors", "TEXT"),
+                              ("guest_sessions", "challenge", "TEXT"), ("enrollments", "policy_version", "TEXT"),
+                              ("people", "deleted_at", "TEXT")):
         if col not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
             db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")  # older libraries: add the new column
     return db
@@ -227,6 +229,8 @@ def work(rec):
     """Everything for one file. Returns a row for `files` and a list of faces (with face pictures as JPEG bytes)."""
     import cv2
     import textinfo, vision
+    from common import settings
+    EST = settings()["estimates"]
     row = {"sha256": rec["sha256"], "name": rec["name"], "ext": rec["ext"], "kind": rec["kind"], "bytes": rec["bytes"],
            "width": rec.get("w"), "height": rec.get("h"), "duration": rec.get("duration")}
     faces = []
@@ -243,7 +247,7 @@ def work(rec):
             meta = photo_meta(rec["path"])
             img = vision.load(rec["path"])
             shot = is_screenshot(rec, meta)
-            found = vision.faces(img)
+            found = vision.faces(img, estimates=EST)
             tags = vision.tags(img)
             names = [t[1] for t in tags]
             if shot or (not found and DOCLIKE & set(names)):
@@ -280,7 +284,7 @@ def work(rec):
                         continue
                     for tg in vision.tags(img, top=2, min_p=0.15):
                         tagcount[tg[1]] = tagcount.get(tg[1], 0) + 1
-                    for fc in vision.faces(img, min_size=40):
+                    for fc in vision.faces(img, min_size=40, estimates=EST):
                         same = next((b for b in best if vision.same_person(b["embedding"], fc["embedding"]) > 0.5), None)
                         if same and same["score"] * same["box"][2] >= fc["score"] * fc["box"][2]:
                             continue

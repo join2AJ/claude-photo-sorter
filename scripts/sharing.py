@@ -12,13 +12,15 @@ those people agreed.
      or that person said yes (and didn't hide it from this viewer). Unregistered faces are always blurred.
 Nothing unblurred ever leaves the server for another person's face.
 """
-import hashlib, hmac, io, os, re, secrets, sys, time
+import hashlib, hmac, io, json, os, re, secrets, sys, time
 
 sys.path.insert(0, os.path.dirname(__file__))
 import facesearch
 from analyze import connect
 from common import DATA, load
 
+POLICY_VERSION = "draft-2026-11"   # the privacy notice people agree to (share-privacy.html); change it when the text changes
+SELFIE_DAYS = 30                   # live selfies are deleted this many days after the sign-up
 TEST_MODE = not os.environ.get("SMS_PROVIDER")  # set when a real SMS service is connected (part 2 on a server)
 CODE_TTL, SESSION_TTL = 300, 30 * 24 * 3600
 
@@ -108,17 +110,41 @@ def logout(token):
 
 # ---------- 2. live selfie ----------
 
-def selfie(token, frames):
+def challenge(token):
+    """A head-turn order picked at random for this one selfie, valid for 2 minutes."""
     s = session(token)
     if not s or s["stage"] not in ("verified", "notfound", "denied"):
         raise PermissionError("Verify your mobile number first.")
-    code, thumb = facesearch.liveness(frames)
+    steps = ["straight"] + secrets.SystemRandom().sample(["left", "right"], 2)
+    db = connect()
+    db.execute("UPDATE guest_sessions SET challenge=? WHERE token_hash=?", (json.dumps({"steps": steps, "at": time.time()}), _h(token)))
+    db.commit()
+    return {"steps": steps}
+
+
+def selfie(token, frames, agreed=False, adult=False):
+    s = session(token)
+    if not s or s["stage"] not in ("verified", "notfound", "denied"):
+        raise PermissionError("Verify your mobile number first.")
+    if not agreed:
+        raise ValueError("Please agree to the face matching first. Without it we can't look for you in the photos.")
+    if not adult:
+        raise ValueError("You must be 18 or older, or have a parent or guardian agree for you.")
+    ch = json.loads(s.get("challenge") or "{}")
+    db = connect()
+    db.execute("UPDATE guest_sessions SET challenge=NULL WHERE token_hash=?", (_h(token),))  # one try per challenge
+    db.commit()
+    if not ch or time.time() - ch["at"] > 120:
+        raise ValueError("That took too long. Start the selfie again.")
+    code, thumb = facesearch.liveness(frames, ch["steps"])
     status, pid, score = facesearch.enroll_check(code, s["mobile"])
     db = connect()
     st = {"conflict": "blocked", "same": "approved", "match": "pending", "none": "notfound"}[status]
-    cur = db.execute("INSERT INTO enrollments (mobile, embedding, selfie, status, person_id, score, at) VALUES (?,?,?,?,?,?,?)",
+    cur = db.execute("INSERT INTO enrollments (mobile, embedding, selfie, status, person_id, score, at, policy_version) VALUES (?,?,?,?,?,?,?,?)",
                      (s["mobile"], code.astype("float32").tobytes(), thumb,
-                      {"blocked": "conflict", "approved": "approved", "pending": "pending", "notfound": "none"}[st], pid, score, now()))
+                      {"blocked": "conflict", "approved": "approved", "pending": "pending", "notfound": "none"}[st], pid, score, now(), POLICY_VERSION))
+    db.execute("INSERT INTO consent_log (person_id, action, detail, at) VALUES (?,?,?,?)",
+               (pid if st == "approved" else None, "agreed to face matching", f"{mask(s['mobile'])}, notice {POLICY_VERSION}, 18+ or guardian agreed", now()))
     if status == "conflict":
         db.execute("INSERT INTO alerts (kind, person_id, mobile, detail, at) VALUES (?,?,?,?,?)",
                    ("impersonation", pid, s["mobile"], f"Someone with {mask(s['mobile'])} tried to sign up with the face of P{pid:04d}, "
@@ -154,8 +180,50 @@ def decide(enrollment_id, action, person_id=None):
     db.commit()
 
 
+def purge():
+    """Keep only what's needed: expired codes and sign-ins go, live selfies go after SELFIE_DAYS,
+    and face codes of sign-ups that never became a person (denied, not found, blocked) go with them."""
+    db = connect()
+    cutoff = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - SELFIE_DAYS * 86400))
+    db.execute("DELETE FROM otps WHERE expires < ?", (time.time() - 3600,))
+    db.execute("DELETE FROM guest_sessions WHERE expires < ?", (time.time(),))
+    db.execute("UPDATE enrollments SET selfie=NULL WHERE at < ?", (cutoff,))
+    db.execute("UPDATE enrollments SET embedding=NULL WHERE at < ? AND status IN ('denied', 'none', 'conflict')", (cutoff,))
+    db.commit()
+
+
+def delete_person(person_id, by="the owner"):
+    """Delete someone's face data: face codes, face pictures, sign-ups, sign-ins, name, number.
+    Their faces stay in the photos as unknown faces, so they are blurred for everyone in the sharing app."""
+    db = connect()
+    pid = int(person_id)
+    ids = [r[0] for r in db.execute("SELECT face_id FROM faces WHERE person_id=?", (pid,))]
+    db.execute("UPDATE faces SET embedding=NULL, person_id=NULL, manual=1 WHERE person_id=?", (pid,))
+    for i in ids:
+        try:
+            os.remove(os.path.join(DATA, "faces", f"{i}.jpg"))
+        except OSError:
+            pass
+    db.execute("""UPDATE people SET name=NULL, mobile=NULL, mobile_verified=0, aliases=NULL, notes=NULL, family=0,
+                  consent='no', share_with='', hide_from='', centroid=NULL, n=0, deleted_at=? WHERE person_id=?""", (now(), pid))
+    db.execute("DELETE FROM enrollments WHERE person_id=?", (pid,))
+    db.execute("DELETE FROM guest_sessions WHERE person_id=?", (pid,))
+    db.execute("DELETE FROM vault_overrides WHERE person_id=?", (pid,))
+    db.execute("UPDATE alerts SET seen=1 WHERE person_id=? AND kind='delete request'", (pid,))
+    db.execute("INSERT INTO consent_log (person_id, action, detail, at) VALUES (?,?,?,?)",
+               (pid, "face data deleted", f"{len(ids)} face codes and pictures, by {by}", now()))
+    db.commit()
+    return len(ids)
+
+
+def consent_log():
+    db = connect()
+    return [dict(r) for r in db.execute("SELECT * FROM consent_log ORDER BY id DESC")]
+
+
 def requests_and_alerts():
     import base64
+    purge()
     db = connect()
     reqs = [dict(r, embedding=None, selfie="data:image/jpeg;base64," + base64.b64encode(r["selfie"]).decode() if r["selfie"] else None)
             for r in db.execute("SELECT * FROM enrollments ORDER BY id DESC LIMIT 200")]

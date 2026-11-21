@@ -493,7 +493,16 @@ REQUESTS = [  # made-up sign-ups from the sharing app
 ALERTS = [{"id": 1, "kind": "impersonation", "person_id": 1, "mobile": "+91 98888 12345", "seen": 0, "at": "2025-06-01 21:40:00",
            "detail": "Someone with +91 ••••• 345 tried to sign up with the face of P0001, which is registered to another number (match 77%). They were blocked."}]
 details = {"files": files, "faces": faces, "source": source, "categories": cats, "running": False, "demo": True,
-           "requests": REQUESTS, "alerts": ALERTS,
+           "requests": REQUESTS, "alerts": ALERTS + [{"id": 2, "kind": "delete request", "person_id": 4, "mobile": "+91 90000 00004", "seen": 0,
+                                                     "at": "2025-06-03 18:20:00", "detail": "P0004 asked to have their face data deleted. Their face is blurred for everyone until you delete it."}],
+           "settings": {"estimates": True}, "policy_version": "draft-2026-11",
+           "consent_log": [
+               {"id": 6, "person_id": 4, "action": "asked to be deleted", "detail": "", "at": "2025-06-03 18:20:00"},
+               {"id": 5, "person_id": 1, "action": "impersonation blocked", "detail": "+91 ••••• 345", "at": "2025-06-01 21:40:00"},
+               {"id": 4, "person_id": 3, "action": "consent no", "detail": "set by the person in the sharing app", "at": "2025-06-01 11:02:00"},
+               {"id": 3, "person_id": 2, "action": "consent yes", "detail": "set by the person in the sharing app", "at": "2025-06-01 10:15:00"},
+               {"id": 2, "person_id": 1, "action": "registered", "detail": "+91 ••••• 001, approved by the owner", "at": "2025-06-01 09:06:00"},
+               {"id": 1, "person_id": 1, "action": "agreed to face matching", "detail": "+91 ••••• 001, notice draft-2026-11, 18+ or guardian agreed", "at": "2025-06-01 09:05:00"}],
            "vault_tree": VAULT_TREE,
            "people": sorted(plist.values(), key=lambda p: (-(p["photos"] + p["videos"]), p["person_id"]))}
 for name, obj in (("inventory.json", inv), ("labels.json", labels), ("dupes.json", dupes), ("categories.json", cats),

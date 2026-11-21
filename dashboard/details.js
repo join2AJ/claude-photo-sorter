@@ -34,6 +34,7 @@ const ICONS = {
   wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
   file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
   film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 12h18"/><path d="M17 3v18"/>',
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   images: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
   left: '<path d="m15 18-6-6 6-6"/>', x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
@@ -130,7 +131,8 @@ const TABS = [
   ["timeline", "timeline", "Timeline", "pulse", () => D.people.filter(p => p.name).length, "People"],
   ["events", "events", "Events", "party", () => events().length, "People"],
   ["search", "face-search", "Face search", "search", () => "", "People"],
-  ["requests", "requests", "Requests & alerts", "bell", () => (D.requests || []).filter(r => r.status === "pending").length + (D.alerts || []).filter(a => !a.seen).length || "", "Sharing"],
+  ["requests", "requests", "Requests & alerts", "bell", () => (D.requests || []).filter(r => r.status === "pending").length + (D.alerts || []).filter(a => !a.seen && a.kind !== "delete request").length || "", "Sharing"],
+  ["privacy", "privacy", "Privacy", "shield", () => (D.alerts || []).filter(a => !a.seen && a.kind === "delete request").length || "", "Sharing"],
 ];
 const TAB = Object.fromEntries(TABS.map(t => [t[0], t]));
 function tabs() {
@@ -138,7 +140,7 @@ function tabs() {
   $("tabs").replaceChildren(...groups.map(g => el("div", { class: "side-group" }, el("h4", {}, g),
     TABS.filter(t => t[5] === g).map(([k, slug, label, ic, n]) => {
       const c = n();
-      return el("a", { href: "#" + slug, class: "side-item" + (k === "requests" && c ? " alert" : ""), "aria-current": ui.tab === k ? "page" : false, onclick: e => {
+      return el("a", { href: "#" + slug, class: "side-item" + ((k === "requests" || k === "privacy") && c ? " alert" : ""), "aria-current": ui.tab === k ? "page" : false, onclick: e => {
         e.preventDefault();
         Object.assign(ui, { tab: k, sort: null, desc: false, shown: 200, q: "", fam: null, ev: null }); remember(); tabs(); render();
         document.querySelector(".side-item[aria-current]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -238,7 +240,7 @@ function render() {
   $("view").replaceChildren();
   $("kpis").hidden = !["all", "shots", "money", "docs", "videos"].includes(ui.tab);
   if (!SUB[ui.tab]) setHash();
-  ({ all: viewAll, family: viewFamily, timeline: viewTimeline, events: viewEvents, search: viewFaceSearch, requests: viewRequests, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
+  ({ privacy: viewPrivacy, all: viewAll, family: viewFamily, timeline: viewTimeline, events: viewEvents, search: viewFaceSearch, requests: viewRequests, people: viewPeople, faces: viewFaces, shots: viewShots, money: viewMoney, docs: viewDocs, videos: viewVideos })[ui.tab]();
 }
 function simple(filter, cols, extra = [], note = null) {
   toolbar(extra, note);
@@ -388,6 +390,9 @@ function personDrawer(p) {
         el("label", {}, "Hide my face from"), chipSet(draft.hide_from, "hide")),
       el("p", { class: "hint" }, "Until this person says yes, their face stays blurred for everyone else in the sharing app. Every change is logged with the date."),
       el("div", { class: "toolbar" }, el("button", { class: "mx-btn solid", onclick: save }, "Save"), el("button", { class: "mx-btn ghost", onclick: () => close() }, "Cancel")),
+      el("div", { class: "danger-zone" }, el("div", {}, el("b", {}, "Delete their face data"),
+        el("p", { class: "hint" }, "Removes their face codes, face pictures, name, number and sign-ups. Their faces stay in the photos as unknown faces, blurred for everyone in the sharing app.")),
+        el("button", { class: "mx-btn small danger", onclick: () => deletePerson(p, close) }, "Delete")),
       el("h3", {}, `Faces (${faces.length})`), el("p", { class: "hint" }, "A face that isn't them? Use its menu to move it."),
       el("div", { class: "faces" }, faces.slice(0, 120).map(faceRow)),
       el("div", { class: "toolbar" }, el("h3", {}, `Photos & videos (${files.length})`), el("span", { class: "spacer" }),
@@ -481,6 +486,8 @@ async function demoApi(path, body) {
     toast("Demo: saved in this page only.");
     return { ok: true };
   }
+  if (path === "/api/settings") { Object.assign(D.settings = D.settings || {}, body); return D.settings; }
+  if (path === "/api/person-delete") { toast("Not in the demo: deleting needs the app."); throw new Error("demo"); }
   toast("Not in the demo. Install the app to merge people and move faces.");
   throw new Error("demo");
 }
@@ -902,4 +909,65 @@ function viewRequests() {
             el("button", { class: "mx-btn small", onclick: () => decide(r, "deny") }, "Deny")) : null);
       }) : el("p", { class: "hint" }, "No sign-ups yet. People sign up at /share.html with their mobile number and a live selfie.")),
     el("p", { class: "hint" }, "Approve only people you know. A face match is not proof of identity: twins, siblings and printed photos can fool it."));
+}
+
+/* ---------- Privacy: estimates switch, deletion requests, consent record, what is kept ---------- */
+async function deletePerson(p, after) {
+  if (!confirm(`Delete ${p.display}'s face data? Their face codes, face pictures, name, number and sign-ups are removed. This can't be undone.`)) return;
+  try { const r = await api("/api/person-delete", { person_id: p.person_id }); toast(`Deleted ${fmt(r.faces)} face codes and pictures.`); }
+  catch (e) { return; }
+  after && after(); await load();
+}
+function viewPrivacy() {
+  toolbar([], el("span", { class: "meta" }, "What is kept about the people in your photos, and the record of what they agreed to."));
+  $("toolbar").querySelector("input").hidden = true;
+  const st = D.settings || { estimates: true };
+  const log = D.consent_log || [];
+  const dels = (D.alerts || []).filter(a => a.kind === "delete request" && !a.seen);
+  const sw = el("input", { type: "checkbox", role: "switch", checked: st.estimates, onchange: async e => {
+    try { D.settings = await api("/api/settings", { estimates: e.target.checked }); } catch (err) { e.target.checked = !e.target.checked; return; }
+    toast(e.target.checked ? "Estimates on. New files get age, gender and mood guesses." : "Estimates off. They're hidden now and never computed for new files.");
+    await load();
+  } });
+  const csv = () => {
+    const rows = [["When", "Person ID", "Name", "What", "Details"], ...log.map(r => [r.at, r.person_id ? pid(r.person_id) : "", byPerson[r.person_id]?.display || "", r.action, r.detail || ""])];
+    el("a", { href: URL.createObjectURL(new Blob([rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" })), download: "consent record.csv" }).click();
+  };
+  $("view").replaceChildren(
+    el("div", { class: "tl-grid" },
+      el("div", { class: "card-box" }, el("h3", {}, "Age, gender and mood estimates"),
+        el("label", { class: "switch-row" }, sw, el("span", {}, st.estimates ? "On: shown as estimates" : "Off: never computed or shown")),
+        el("p", { class: "hint" }, "These are guesses by a computer model and are often wrong. The EU bans emotion recognition at workplaces and schools, which can include company events. Turn them off if you sell or share the app, until a lawyer says otherwise.")),
+      el("div", { class: "card-box" }, el("h3", {}, "Documents"),
+        el("a", { class: "doc-link", href: "share-privacy.html", target: "_blank", rel: "noopener" }, "📄 Privacy notice people agree to ", el("span", { class: "pid" }, D.policy_version || "draft")),
+        el("p", { class: "hint" }, "Questions for a privacy lawyer: docs/legal-checklist.md in the app folder. Both are drafts until a lawyer checks them."))),
+    el("div", { class: "card-box" }, el("h3", {}, `Deletion requests${dels.length ? ` (${dels.length})` : ""}`),
+      dels.length ? dels.map(a => { const p = byPerson[a.person_id];
+        return el("div", { class: "req" }, el("img", { class: "face", src: p && p.cover ? faceImg(p.cover) : "", alt: "", style: "width:48px;height:48px;border-radius:50%" }),
+          el("div", { class: "req-txt" }, el("b", {}, p ? p.display : pid(a.person_id)), el("span", { class: "hint" }, a.detail), el("small", { class: "hint" }, a.at)),
+          el("button", { class: "mx-btn small danger", onclick: () => p && deletePerson(p) }, "Delete their face data")); })
+        : el("p", { class: "hint" }, "No one has asked to be deleted. People can ask from the sharing app (Settings → Blur me everywhere).")),
+    el("div", { class: "card-box" }, el("h3", {}, "What is kept, and for how long"),
+      el("div", { class: "keep" }, [
+        ["Face codes (128 numbers per face)", "Until you delete the person", "To group faces into people and find photos"],
+        ["Mobile numbers", "Until you delete the person", "Sign-in and impersonation alerts"],
+        ["Live selfies from sign-ups", "30 days, then deleted automatically", "So you can check who signed up"],
+        ["Face codes of rejected sign-ups", "30 days", "To spot repeated impersonation"],
+        ["One-time codes", "About an hour", "Sign-in"],
+        ["Sign-ins", "30 days", "Staying signed in"],
+        ["Consent record", "Kept", "Proof of what people agreed to"],
+      ].map(([a, b, c]) => el("div", { class: "keep-row" }, el("b", {}, a), el("span", {}, b), el("span", { class: "hint" }, c))))),
+    logCard());
+  function logCard() {
+    const head = el("div", { class: "toolbar" }, el("h3", {}, `Consent record (${fmt(log.length)})`), el("span", { class: "spacer" }),
+      log.length ? el("button", { class: "mx-btn small", onclick: csv }, icon("download"), "Download CSV") : null);
+    if (!log.length) return el("div", { class: "card-box" }, head, el("p", { class: "hint" }, "Nothing recorded yet."));
+    const row = r => el("tr", {}, el("td", {}, r.at),
+      el("td", {}, r.person_id ? `${byPerson[r.person_id]?.display || "deleted"} · ${pid(r.person_id)}` : "—"),
+      el("td", {}, r.action), el("td", { class: "wrap" }, r.detail || ""));
+    const tbl = el("table", { class: "dtable" }, el("thead", {}, el("tr", {}, ["When", "Person", "What", "Details"].map(h => el("th", {}, h)))),
+      el("tbody", {}, log.slice(0, 300).map(row)));
+    return el("div", { class: "card-box" }, head, el("div", { class: "tbl-wrap flat" }, tbl));
+  }
+  paintIcons($("view"));
 }

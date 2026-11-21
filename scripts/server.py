@@ -320,8 +320,10 @@ class H(SimpleHTTPRequestHandler):
             if method == "POST" and path == "/share/api/verify":
                 token = sharing.verify_code(body.get("mobile"), body.get("code"))
                 return self.send_json(sharing.me(token), cookie=f"ps_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={sharing.SESSION_TTL}")
+            if method == "POST" and path == "/share/api/challenge":
+                return self.send_json(sharing.challenge(tok))
             if method == "POST" and path == "/share/api/selfie":
-                sharing.selfie(tok, body.get("frames") or [])
+                sharing.selfie(tok, body.get("frames") or [], bool(body.get("agreed")), bool(body.get("adult")))
                 return self.send_json(sharing.me(tok))
             if method == "POST" and path == "/share/api/consent":
                 sharing.set_consent(tok, body)
@@ -484,6 +486,17 @@ class H(SimpleHTTPRequestHandler):
                 import sharing
                 sharing.decide(int(body["id"]), body.get("action"), body.get("person_id"))
                 return self.send_json({"ok": True})
+            elif p == "/api/person-delete":
+                sys.path.insert(0, SCRIPTS)
+                import sharing
+                return self.send_json({"faces": sharing.delete_person(body["person_id"])})
+            elif p == "/api/settings":
+                from common import SETTINGS, settings
+                s = settings()
+                if "estimates" in body:
+                    s["estimates"] = bool(body["estimates"])
+                save(SETTINGS, s)
+                return self.send_json(s)
             elif p == "/api/alert-seen":
                 db_conn().execute("UPDATE alerts SET seen=1").connection.commit()
                 return self.send_json({"ok": True})
@@ -529,7 +542,9 @@ def details_json():
     import vault
     import sharing
     reqs, alerts = sharing.requests_and_alerts()
+    from common import settings
     return {"files": L["files"], "faces": L["faces"], "people": people, "source": L["source"], "requests": reqs, "alerts": alerts,
+            "consent_log": sharing.consent_log()[:500], "settings": settings(), "policy_version": sharing.POLICY_VERSION,
             "categories": L["categories"], "running": job["running"],
             "vault_tree": {"tree": vault.TREE, "company": vault.COMPANY_SUB}}
 

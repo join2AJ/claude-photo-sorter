@@ -74,7 +74,7 @@ def _crop(img, box, margin=0.4):
     return img[y0:y1, x0:x1]
 
 
-def faces(img, min_size=36):
+def faces(img, min_size=36, estimates=True):
     """Every face bigger than min_size pixels, with its fingerprint and estimates."""
     H, W = img.shape[:2]
     det = _model("yunet.onnx")
@@ -88,18 +88,21 @@ def faces(img, min_size=36):
         rec = _model("sface.onnx")
         emb = rec.feature(rec.alignCrop(img, f)).flatten()
         emb = emb / (np.linalg.norm(emb) + 1e-9)
-        face = _crop(img, (x, y, w, h))
-        blob = cv2.resize(face, (224, 224)).astype(np.float32) - np.array([104, 117, 123], np.float32)
-        blob = blob.transpose(2, 0, 1)[None]
-        age_p = _model("age.onnx").run(None, {"input": blob})[0][0]  # these two already give probabilities
-        age_p = age_p / age_p.sum()
-        gen_p = _model("gender.onnx").run(None, {"input": blob})[0][0]
-        gen_p = gen_p / gen_p.sum()
-        tight = _crop(img, (x, y, w, h), 0.05)
-        g = cv2.resize(cv2.cvtColor(tight, cv2.COLOR_BGR2GRAY), (64, 64)).astype(np.float32)[None, None]
-        emo_p = _softmax(_model("emotion.onnx").run(None, {"Input3": g})[0][0])
+        if estimates:  # switched off in settings: these models never run
+            face = _crop(img, (x, y, w, h))
+            blob = cv2.resize(face, (224, 224)).astype(np.float32) - np.array([104, 117, 123], np.float32)
+            blob = blob.transpose(2, 0, 1)[None]
+            age_p = _model("age.onnx").run(None, {"input": blob})[0][0]  # these two already give probabilities
+            age_p = age_p / age_p.sum()
+            gen_p = _model("gender.onnx").run(None, {"input": blob})[0][0]
+            gen_p = gen_p / gen_p.sum()
+            tight = _crop(img, (x, y, w, h), 0.05)
+            g = cv2.resize(cv2.cvtColor(tight, cv2.COLOR_BGR2GRAY), (64, 64)).astype(np.float32)[None, None]
+            emo_p = _softmax(_model("emotion.onnx").run(None, {"Input3": g})[0][0])
+        else:
+            age_p, gen_p, emo_p = np.ones(8) / 8, np.ones(2) / 2, np.ones(8) / 8
         a = int(age_p.argmax())
-        small = min(w, h) < 64  # too few pixels to guess age, gender or mood
+        small = min(w, h) < 64 or not estimates  # too few pixels to guess age, gender or mood (or switched off)
         out.append({
             "box": [int(x), int(y), int(w), int(h)], "score": round(float(f[14]), 3),
             "embedding": emb.astype(np.float32),
@@ -109,6 +112,7 @@ def faces(img, min_size=36):
             "emotion": None if small else EMOTIONS[int(emo_p.argmax())],
             "emotion_conf": None if small else round(float(emo_p.max()), 2),
             "area": float(w * h) / (W * H),
+            "yaw": yaw(f),
         })
     return out
 
@@ -122,6 +126,14 @@ def detect_boxes(img, min_size=8, score=0.6):
     _, found = det.detect(img)
     det.setScoreThreshold(0.75)
     return [[int(v) for v in f[:4]] for f in (found if found is not None else []) if min(f[2], f[3]) >= min_size]
+
+
+def yaw(f):
+    """Which way the head is turned, from the 5 face points: about 0 looking straight,
+    positive = turned towards the person's own left, negative = towards their right (raw, unmirrored camera image)."""
+    ex1, ex2, nx = float(f[4]), float(f[6]), float(f[8])
+    d = abs(ex2 - ex1) or 1.0
+    return round((nx - (ex1 + ex2) / 2) / d, 3)
 
 
 def face_thumb(img, box, size=160):

@@ -4,7 +4,7 @@ import csv, os, sqlite3, sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(__file__))
-from common import CATEGORIES, DATA, DB, load
+from common import CATEGORIES, DATA, DB, load, settings
 import tags, vault
 from datetime import datetime
 
@@ -50,7 +50,7 @@ def library():
         info = {r["sha256"]: dict(r) for r in db.execute("SELECT * FROM files")}
         people = {r["person_id"]: dict(r) for r in db.execute(
             "SELECT person_id, name, mobile, mobile_verified, consent, consent_at, share_with, hide_from, notes, created_at, "
-            "family, aliases FROM people")}
+            "family, aliases, deleted_at FROM people")}
         overrides = {r["sha256"]: dict(r) for r in db.execute("SELECT * FROM vault_overrides")}
         faces = [dict(r) for r in db.execute(
             "SELECT face_id, sha256, frame_s, x, y, w, h, img_w, img_h, score, age, age_years, gender, gender_conf, "
@@ -123,6 +123,12 @@ def library():
         f["file_ids"] = [fl["id"] for fl in file_by_sha.get(f["sha256"], [])]
         f["file"] = file_by_sha.get(f["sha256"], [{}])[0].get("name", "")
         f["person"] = people[f["person_id"]]["display"] if f["person_id"] in people else ""
+    if not settings()["estimates"]:  # switched off: never shown, even if guessed before
+        for f in faces:
+            f.update(age=None, age_years=None, gender=None, gender_conf=None, emotion=None, emotion_conf=None)
+        for p in people.values():
+            p.update(age_est=None, gender_est="", emotion_usual="", emotion_mix="")
+    people = {k: v for k, v in people.items() if not v.get("deleted_at")}
     face_by_id = {f["face_id"]: f for f in faces}
     for f in files:
         f["labels"] = tags.make_labels(f, [face_by_id[i] for i in f["face_ids"] if i in face_by_id], people)

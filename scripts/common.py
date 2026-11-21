@@ -31,6 +31,16 @@ def kind_of(path):
     return "photo" if ext in IMG else "video" if ext in VID else "doc" if ext in DOC else None
 
 
+SETTINGS = os.path.join(WORK, "settings.json")
+DEFAULT_SETTINGS = {"estimates": True}  # age, gender and emotion guesses; off = never computed or shown
+
+
+def settings():
+    s = dict(DEFAULT_SETTINGS)
+    s.update(load(SETTINGS, {}) or {})
+    return s
+
+
 def load(path, default=None):
     if not os.path.exists(path):
         return default

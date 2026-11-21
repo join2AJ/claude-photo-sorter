@@ -119,13 +119,23 @@ Faces, text, the Details page and the Excel file always come from your computer,
 - `Library details.xlsx` contains personal information. Keep it private.
 - Face data counts as sensitive personal data under privacy laws (India's DPDP Act, GDPR). Ask people before naming them or sharing their photos. Consent changes are logged with the date.
 
+## Privacy safeguards
+
+- **Consent first:** before a selfie, people tick that they agree to face matching (linked to the privacy notice, `share-privacy.html`) and that they're 18+ or a guardian agrees. Each agreement is recorded with the notice version and time.
+- **Live selfie with a random challenge:** the server picks the head-turn order (left then right, or right then left) and checks each turn really happened, so a still photo or an old recording doesn't work.
+- **Deletion:** people can ask from the sharing app; you delete a person's face codes, face pictures, number and sign-ups in one click (Library → Privacy, or their People panel). Their faces then stay blurred for everyone.
+- **Automatic clean-up:** codes after an hour, sign-ins and live selfies after 30 days.
+- **Estimates switch:** age, gender and mood guesses can be turned off (Library → Privacy); then they're never computed.
+- **Consent record:** every agreement, change, block and deletion, downloadable as CSV.
+- **For your lawyer:** `docs/legal-checklist.md` lists what the app does and the questions to ask before going public.
+
 ## The sharing app today, and what's needed to put it online
 
 It works end to end on your computer, in **test mode**: no SMS is sent, the code is shown on screen. The app's server only listens to your own computer, so other people can't reach it yet. To open it to others:
 
 1. A server (or a secure tunnel to your computer) with HTTPS, so phones can reach it and use their camera.
 2. An SMS service for the codes (MSG91, Twilio, Firebase...). Set `SMS_PROVIDER` and connect it in `scripts/sharing.py` (`send_code`). This costs a little per message.
-3. A stronger liveness check than the basic head turn (it stops a still photo, not a video or a mask), and a privacy policy reviewed by a lawyer.
+3. A privacy notice and terms reviewed by a lawyer (`docs/legal-checklist.md`). The head-turn check stops photos and replayed videos, not masks or deepfakes; a tested anti-spoofing model can be added later.
 
 Face matching can be wrong (twins, siblings, children): access always needs the mobile code plus your approval for new people, never a face alone.
 

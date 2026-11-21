@@ -75,12 +75,16 @@ def search(data_url, limit=12):
             "estimate": {k: f[k] for k in ("age", "gender", "emotion")}, "people": out}
 
 
-def liveness(frames):
-    """Basic live-selfie check from 3 frames taken while the person turns their head:
-    one face in each, the same person in all, and the face actually moved.
-    It stops a still photo; it does NOT stop a video or a mask. Pair it with SMS and owner review."""
+TURN = 0.12  # how far the nose must move sideways, in eye-widths, for a head turn to count
+
+
+def liveness(frames, steps=("straight", "left", "right")):
+    """Live-selfie check from 3 frames: looking straight, then turning the head the way the server asked,
+    in a random order (so a recording made earlier won't match). One face in each, the same person in all,
+    and each turn really goes the asked way (from the eyes and nose). It stops photos and most replayed
+    videos; it does NOT stop a mask or a deepfake. Always pair it with the SMS code and owner review."""
     if len(frames) < 3:
-        raise ValueError("We need three pictures: straight, then turning left, then right.")
+        raise ValueError("We need three pictures: straight, then the two head turns.")
     found = []
     for d in frames[:3]:
         img = decode(d, 960)
@@ -93,10 +97,11 @@ def liveness(frames):
     same = min(float(a["embedding"] @ b["embedding"]), float(a["embedding"] @ c["embedding"]))
     if same < 0.45:
         raise ValueError("The pictures don't look like the same person. Try again, slowly.")
-    cx = [(f["box"][0] + f["box"][2] / 2) / w for f, w in found]
-    moved = max(cx) - min(cx)
-    if moved < 0.05:
-        raise ValueError("Turn your head a little when asked, so we know it's really you and not a photo.")
+    base = a["yaw"]
+    for f, want in zip((b, c), steps[1:3]):
+        d = f["yaw"] - base
+        if (want == "left" and d < TURN) or (want == "right" and d > -TURN):
+            raise ValueError(f"We didn't see your head turn to your {want}. Turn it a little more, slowly, when asked.")
     best = max((x[0] for x in found), key=lambda f: f["score"] * f["box"][2])
     img = decode(frames[[x[0] for x in found].index(best)], 960)
     thumb = cv2.imencode(".jpg", vision.face_thumb(img, best["box"]), [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()

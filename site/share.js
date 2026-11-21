@@ -45,7 +45,8 @@ const server = {
   me: () => server.call("/share/api/me"),
   code: mobile => server.call("/share/api/code", { mobile }),
   verify: (mobile, code) => server.call("/share/api/verify", { mobile, code }),
-  selfie: frames => server.call("/share/api/selfie", { frames }),
+  challenge: () => server.call("/share/api/challenge", {}),
+  selfie: (frames, agreed, adult) => server.call("/share/api/selfie", { frames, agreed, adult }),
   consent: b => server.call("/share/api/consent", b),
   forget: () => server.call("/share/api/forget", {}),
   logout: () => server.call("/share/api/logout", {}),
@@ -211,6 +212,18 @@ function code() {
 /* live selfie: three pictures while turning the head a little */
 let stream;
 function stopCamera() { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; }
+/* explicit consent before any face is compared (recorded with the notice version) */
+const PRIVACY = "share-privacy.html" + (DEMO && !window.STATIC_DEMO ? "?demo" : "");
+function agreeBox(onChange) {
+  const st = { agreed: !!S.agreed, adult: !!S.adult };
+  const row = (k, ...text) => el("label", { class: "agree" }, el("input", { type: "checkbox", checked: st[k], onchange: e => { st[k] = S[k] = e.target.checked; onChange(st.agreed && st.adult); } }), el("span", {}, ...text));
+  setTimeout(() => onChange(st.agreed && st.adult));
+  return el("div", { class: "agree-box" },
+    row("agreed", "I agree that my selfie is turned into a face code and compared with the faces in this album, only to find my photos and to stop others using my face. ",
+      el("a", { href: PRIVACY, target: "_blank", rel: "noopener" }, "Privacy notice")),
+    row("adult", "I'm 18 or older, or my parent or guardian agrees for me."));
+}
+const SAY = { straight: "Look straight at the camera", left: "Turn your head to your left", right: "Turn your head to your right" };
 async function selfie() {
   if (DEMO) return demoSelfie();
   const video = el("video", { playsinline: true, autoplay: true, muted: true });
@@ -219,14 +232,16 @@ async function selfie() {
   const err = el("p", { class: "err", role: "alert" });
   const start = el("button", { class: "btn primary", disabled: true });
   start.innerHTML = svg("camera") + " Start";
-  frame("selfie", el("h1", {}, "A quick selfie"), el("p", { class: "lead" }, "Fit your face in the circle. We'll take three pictures while you turn your head a little."),
-    el("div", { class: "cam" }, video, el("div", { class: "mask" }), ring, count, say), el("div", { class: "shots" }, shots), err, start,
+  let ready = false, camOk = false;
+  const agree = agreeBox(ok => { ready = ok; start.disabled = !(ready && camOk); });
+  frame("selfie", el("h1", {}, "A quick selfie"), el("p", { class: "lead" }, "Fit your face in the circle. We'll take three pictures: looking straight, then turning your head the way we ask."),
+    el("div", { class: "cam" }, video, el("div", { class: "mask" }), ring, count, say), el("div", { class: "shots" }, shots), agree, err, start,
     el("p", { class: "small center" }, "Only a small face picture is kept, to match you with your photos."));
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
     video.srcObject = stream;
     await video.play();
-    say.textContent = "Look straight at the camera"; start.disabled = false;
+    say.textContent = "Look straight at the camera"; camOk = true; start.disabled = !ready;
   } catch (e) {
     say.textContent = "";
     err.textContent = "We can't use your camera. Allow camera access for this page in your browser settings, then reload.";
@@ -235,9 +250,10 @@ async function selfie() {
   start.onclick = async () => {
     start.disabled = true; err.textContent = "";
     const frames = [];
-    const steps = ["Look straight at the camera", "Turn your head a little to the left", "Now a little to the right"];
+    let steps;
+    try { steps = (await api.challenge()).steps; } catch (ex) { err.textContent = ex.message; start.disabled = false; return; }
     for (let i = 0; i < 3; i++) {
-      say.textContent = steps[i];
+      say.textContent = SAY[steps[i]];
       for (let n = 3; n > 0; n--) { count.textContent = n; await new Promise(r => setTimeout(r, 650)); }
       count.textContent = "";
       const c = el("canvas"); c.width = video.videoWidth; c.height = video.videoHeight;
@@ -248,21 +264,23 @@ async function selfie() {
     }
     stopCamera();
     checking();
-    try { route(await api.selfie(frames)); }
+    try { route(await api.selfie(frames, S.agreed, S.adult)); }
     catch (ex) { await selfie(); $("screen").querySelector(".err").textContent = ex.message; }
   };
 }
 async function demoSelfie() {
   const people = await demo.samples();
-  const pick = async who => { checking(); route(await demo.selfie(who)); };
-  frame("selfie", el("h1", {}, "A quick selfie"),
-    el("p", { class: "lead" }, "In the app you take a live selfie and turn your head a little. In this demo, pick who you are:"),
-    el("div", { class: "samples" },
+  let ok = false;
+  const pick = async who => { if (!ok) return toast("Tick both boxes first."); checking(); route(await demo.selfie(who)); };
+  const samples = el("div", { class: "samples" },
       people.map(p => el("button", { class: "sample", onclick: () => pick(p.person_id) }, el("img", { src: `demo/faces/${p.cover}.jpg`, alt: "" }), p.display.split(" ")[0],
         el("small", {}, p.mobile_verified ? "registered" : "new: owner confirms"))),
       el("button", { class: "sample bad", onclick: () => pick("impostor") }, el("img", { src: `demo/faces/${people[0].cover}.jpg`, alt: "" }), "Impostor",
         el("small", {}, `uses ${people[0].display.split(" ")[0]}'s face`)),
-      el("button", { class: "sample", onclick: () => pick("nobody") }, el("span", { style: "font-size:40px;line-height:64px" }, "🙂"), "Stranger", el("small", {}, "not in any photo"))),
+      el("button", { class: "sample", onclick: () => pick("nobody") }, el("span", { style: "font-size:40px;line-height:64px" }, "🙂"), "Stranger", el("small", {}, "not in any photo")));
+  frame("selfie", el("h1", {}, "A quick selfie"),
+    el("p", { class: "lead" }, "In the app you take a live selfie and turn your head the way we ask (in a random order). In this demo, agree, then pick who you are:"),
+    agreeBox(v => { ok = v; samples.classList.toggle("off", !v); }), samples,
     el("p", { class: "small" }, "Your face picture is compared with the faces in the album. Face matching can be wrong, so new people are confirmed by the album owner."));
 }
 function checking() { frame("selfie", el("div", { class: "spin" }), el("h2", { class: "center", style: "text-align:center" }, "Checking it's really you…"), el("p", { class: "lead", style: "text-align:center" }, "Matching your face with the album.")); }
