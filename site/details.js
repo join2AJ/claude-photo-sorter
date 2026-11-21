@@ -35,6 +35,8 @@ const ICONS = {
   file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
   film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 12h18"/><path d="M17 3v18"/>',
   shield: '<path d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.6 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/>',
+  pencil: '<path d="M21.2 6.8a1 1 0 0 0-4-4L3.8 16.2a2 2 0 0 0-.5.8l-1.3 4.4a.5.5 0 0 0 .6.6l4.4-1.3a2 2 0 0 0 .8-.5z"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>', trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
   images: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
   left: '<path d="m15 18-6-6 6-6"/>', x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
@@ -486,6 +488,14 @@ async function demoApi(path, body) {
     toast("Demo: saved in this page only.");
     return { ok: true };
   }
+  if (path === "/api/event-name") { (D.event_names = D.event_names || {})[body.start] = body.name; if (!body.name) delete D.event_names[body.start]; return { ok: true }; }
+  if (path === "/api/vault-tree") {
+    if (body.reset) { toast("Demo: reload the page to see the standard folders."); return { ok: true }; }
+    const move = p => { for (const [o, n] of Object.entries(body.edits).sort((a, b) => b[0].length - a[0].length)) if (p === o || p.startsWith(o + "/")) return n == null ? null : n + p.slice(o.length); return p; };
+    D.files.forEach(f => { if (f.vault) { const n = move(f.vault.path); f.vault.path = n || "5. Miscellaneous"; f.vault.folder_name = f.vault.path.split("/").pop(); } });
+    Object.assign(D.vault_tree, { tree: body.tree, words: body.words });
+    toast("Demo: folders changed in this page. In the app, papers are filed again with your words."); return { ok: true };
+  }
   if (path === "/api/settings") { Object.assign(D.settings = D.settings || {}, body); return D.settings; }
   if (path === "/api/person-delete") { toast("Not in the demo: deleting needs the app."); throw new Error("demo"); }
   toast("Not in the demo. Install the app to merge people and move faces.");
@@ -516,7 +526,8 @@ function viewFamily() {
   const members = D.people.filter(p => p.family);
   const unsure = papers.filter(f => !f.vault.person_id || !byPerson[f.vault.person_id]);
   ui.open = ui.open || {};
-  toolbar([], el("span", { class: "meta" }, "Papers are found by the name printed in them or the face in them; photos they're in are added to 2. Photos. You can change whose a paper is."));
+  toolbar([el("button", { class: "mx-btn small", onclick: editFolders }, icon("pencil"), "Edit folders")],
+    el("span", { class: "meta" }, "Papers are found by the name printed in them or the face in them; photos they're in are added to 2. Photos."));
   renderBody = () => {
     setHash();
     if (ui.fam == null) {
@@ -848,7 +859,8 @@ function viewEvents() {
     const stat = (h, v, s) => el("div", { class: "mx-kpi" }, el("h3", {}, h), el("b", {}, v), el("small", {}, s || " "));
     $("view").replaceChildren(
       el("div", { class: "toolbar" }, el("button", { class: "mx-btn ghost small", onclick: () => { ui.ev = null; renderBody(); } }, icon("left"), "Events"),
-        el("h3", { class: "crumb" }, `${ev.title} · ${niceDate(ev.start)}`), el("span", { class: "spacer" }),
+        el("h3", { class: "crumb" }, `${ev.title} · ${niceDate(ev.start)}`),
+        el("button", { class: "mx-btn ghost small", onclick: e => renameEvent(ev, e.currentTarget.previousSibling) }, icon("pencil"), "Rename"), el("span", { class: "spacer" }),
         el("button", { class: "mx-btn small", onclick: csv }, icon("download"), "Guest list (CSV)")),
       el("section", { class: "mx-kpis", style: "--n:5" },
         stat("Photos", fmt(ev.files.length), `${ev.start.slice(11, 16)}–${ev.end.slice(11, 16)}${hours >= 1 ? ` · ${Math.round(hours)} h` : ""}`),
@@ -970,4 +982,83 @@ function viewPrivacy() {
     return el("div", { class: "card-box" }, head, el("div", { class: "tbl-wrap flat" }, tbl));
   }
   paintIcons($("view"));
+}
+
+/* ---------- rename an event ---------- */
+function renameEvent(ev, h3) {
+  const input = el("input", { class: "field", value: ev.title, "aria-label": "Event name", style: "max-width:320px" });
+  const save = async () => {
+    const name = input.value.trim();
+    try { await api("/api/event-name", { start: ev.start, name: name === ev.label ? "" : name }); } catch (e) { return; }
+    if (!DEMO) D.event_names = { ...(D.event_names || {}), [ev.start]: name };
+    D._events = null; toast("Renamed."); render();
+  };
+  input.onkeydown = e => { if (e.key === "Enter") save(); if (e.key === "Escape") render(); };
+  h3.replaceWith(el("span", { class: "rename" }, input, el("button", { class: "mx-btn small solid", onclick: save }, "Save")));
+  input.focus(); input.select();
+}
+
+/* ---------- edit the family folder tree ---------- */
+function editFolders() {
+  const words = { ...(D.vault_tree.words || {}) };
+  const root = { name: "", kids: [] };
+  D.vault_tree.tree.forEach(path => {
+    let n = root, sofar = "";
+    path.split("/").forEach(part => {
+      sofar = sofar ? sofar + "/" + part : part;
+      let k = n.kids.find(x => x.orig === sofar);
+      if (!k) { k = { name: part, orig: sofar, kids: [], words: words[sofar] || "" }; n.kids.push(k); }
+      n = k;
+    });
+  });
+  const removed = [];
+  const list = el("div", { class: "ftree-edit" });
+  const pathOf = (n, parent) => (parent ? parent + "/" : "") + n.name.trim();
+  const draw = () => {
+    list.replaceChildren();
+    const walk = (n, depth) => n.kids.forEach(k => {
+      const name = el("input", { class: "field small", value: k.name, "aria-label": "Folder name", oninput: e => k.name = e.target.value.replace(/\//g, "-") });
+      const w = el("input", { class: "field small words", value: k.words, placeholder: "Words (optional)", "aria-label": "Words", oninput: e => k.words = e.target.value });
+      const btn = (ic, label, fn) => { const b = el("button", { class: "mx-icon", "aria-label": label, title: label, onclick: fn }); b.append(icon(ic)); return b; };
+      list.append(el("div", { class: "fe-row", style: `--d:${depth}` }, el("span", { class: "fe-ico" }, "📁"), name, w,
+        btn("plus", "Add a folder inside", () => { k.kids.push({ name: "New folder", orig: null, kids: [], words: "" }); draw(); }),
+        btn("trash", "Remove", () => {
+          if (!confirm(`Remove "${k.name}"${k.kids.length ? " and the folders inside it" : ""}? Papers in it go to the folder above.`)) return;
+          const gone = x => { if (x.orig) removed.push(x.orig); x.kids.forEach(gone); };
+          gone(k); n.kids.splice(n.kids.indexOf(k), 1); draw();
+        })));
+      walk(k, depth + 1);
+    });
+    walk(root, 0);
+    paintIcons(list);
+  };
+  const save = async () => {
+    const tree = [], edits = {}, wds = {};
+    const walk = (n, parent) => n.kids.forEach(k => {
+      const p = pathOf(k, parent);
+      if (!k.name.trim()) return;
+      if (!k.kids.length) tree.push(p); else tree.push(p);
+      if (k.orig && k.orig !== p) edits[k.orig] = p;
+      if (k.words.trim()) wds[p] = k.words.trim();
+      walk(k, p);
+    });
+    walk(root, "");
+    removed.forEach(o => edits[o] = null);
+    const leaves = tree.filter(p => !tree.some(q => q.startsWith(p + "/")));
+    try { await api("/api/vault-tree", { tree: leaves, edits, words: wds }); } catch (e) { return; }
+    close(); if (!DEMO) { toast("Saved. Press Start sorting again to copy papers into the new folders."); await load(); } else render();
+  };
+  const scrim = el("div", { class: "drawer-scrim", onclick: e => e.target === scrim && close() },
+    el("div", { class: "drawer wide-drawer", role: "dialog", "aria-label": "Edit family folders" },
+      el("div", { class: "toolbar" }, el("h2", {}, "Family folders"), el("span", { class: "spacer" }), el("button", { class: "mx-icon", "aria-label": "Close", onclick: () => close() }, icon("x"))),
+      el("p", { class: "hint" }, "Every family member gets these folders. Rename, add or remove them. Words are optional: a paper that contains one of a folder's words goes there first, before the built-in rules (e.g. \"aws, azure\" for a Cloud Security resume folder). 4. Company gets a folder per employer automatically."),
+      list,
+      el("div", { class: "toolbar" }, el("button", { class: "mx-btn small", onclick: () => { root.kids.push({ name: `${root.kids.length + 1}. New folder`, orig: null, kids: [], words: "" }); draw(); } }, icon("plus"), "Add a main folder"),
+        el("span", { class: "spacer" }),
+        el("button", { class: "mx-btn small ghost", onclick: async () => { if (!confirm("Go back to the standard folders? Your changes and words are removed.")) return; await api("/api/vault-tree", { reset: true }); close(); await load(); } }, "Back to standard folders"),
+        el("button", { class: "mx-btn small", onclick: () => close() }, "Cancel"),
+        el("button", { class: "mx-btn small solid", onclick: save }, "Save folders"))));
+  function close() { scrim.remove(); }
+  draw();
+  $("overlay").replaceChildren(scrim); paintIcons(scrim);
 }

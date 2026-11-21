@@ -131,7 +131,7 @@ with open(os.path.join(dest, "sorted.csv"), "w", newline="") as fc, \
             print(f"  copied {n}/{len(recs)}", flush=True)
 
 for root in family_roots:  # the whole folder tree, empty folders too
-    for sub in vault.TREE:
+    for sub in vault.tree():
         os.makedirs(os.path.join(dest, root, *sub.split("/")), exist_ok=True)
 
 # folders show the date of their newest file as "Modified" (like 9 Jan 2021), not today's date

@@ -170,13 +170,21 @@ def build(out, L=None, base=DATA):
     if cur:
         groups.append(cur)
     groups = [g for g in groups if len(g) >= 6 and len({p for f in g for p in f["people_ids"]}) >= 3]
+    names = L.get("event_names") or {}
+    if not names:
+        try:
+            from details import connect as _c
+            db = _c()
+            names = {r[0]: r[1] for r in db.execute("SELECT start, name FROM event_names")} if db else {}
+        except Exception:
+            names = {}
     if groups:
         ws = wb.create_sheet("Events")
         hdr = ["Face", "Event", "Date", "From", "To", "Photos in event", "Person ID", "Name", "Photos with them", "First seen", "Last seen",
                "Usual mood (est.)", "Moods seen (est.)", "Age (est.)", "Gender (est.)"]
         rows, pics = [], []
         for g in reversed(groups):
-            title = f"{g[0]['taken'][:10]} · {len(g)} photos"
+            title = names.get(g[0]["taken"]) or f"{g[0]['taken'][:10]} · {len(g)} photos"
             guests = {}
             for f in g:
                 for x in (face_by_id[i] for i in f["face_ids"] if i in face_by_id):

@@ -497,6 +497,27 @@ class H(SimpleHTTPRequestHandler):
                     s["estimates"] = bool(body["estimates"])
                 save(SETTINGS, s)
                 return self.send_json(s)
+            elif p == "/api/vault-tree":
+                sys.path.insert(0, SCRIPTS)
+                import vault
+                if body.get("reset"):
+                    try:
+                        os.remove(vault._CFG)
+                    except OSError:
+                        pass
+                else:
+                    vault.save_config(body.get("tree") or [], body.get("edits") or {}, body.get("words") or {})
+                return self.send_json({"ok": True})
+            elif p == "/api/event-name":
+                db = db_conn()
+                db.execute("CREATE TABLE IF NOT EXISTS event_names (start TEXT PRIMARY KEY, name TEXT)")
+                name = (body.get("name") or "").strip()[:80]
+                if name:
+                    db.execute("INSERT OR REPLACE INTO event_names (start, name) VALUES (?,?)", (body["start"], name))
+                else:
+                    db.execute("DELETE FROM event_names WHERE start=?", (body["start"],))
+                db.commit()
+                return self.send_json({"ok": True})
             elif p == "/api/alert-seen":
                 db_conn().execute("UPDATE alerts SET seen=1").connection.commit()
                 return self.send_json({"ok": True})
@@ -546,7 +567,14 @@ def details_json():
     return {"files": L["files"], "faces": L["faces"], "people": people, "source": L["source"], "requests": reqs, "alerts": alerts,
             "consent_log": sharing.consent_log()[:500], "settings": settings(), "policy_version": sharing.POLICY_VERSION,
             "categories": L["categories"], "running": job["running"],
-            "vault_tree": {"tree": vault.TREE, "company": vault.COMPANY_SUB}}
+            "vault_tree": {"tree": vault.tree(), "company": vault.COMPANY_SUB, "words": vault.config().get("words") or {}},
+            "event_names": event_names()}
+
+
+def event_names():
+    db = db_conn()
+    db.execute("CREATE TABLE IF NOT EXISTS event_names (start TEXT PRIMARY KEY, name TEXT)")
+    return {r["start"]: r["name"] for r in db.execute("SELECT start, name FROM event_names")}
 
 
 def file_text(i):

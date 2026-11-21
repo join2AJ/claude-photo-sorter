@@ -258,3 +258,13 @@ svg.viz .hit:hover { fill: var(--tone-40); fill-opacity: .5; }
 .danger-zone p { margin: 2px 0 0; }
 .mx-btn.danger { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, transparent); }
 @media (max-width: 640px) { .keep-row { grid-template-columns: 1fr; gap: 2px; } }
+/* folder editor, renaming */
+.wide-drawer { width: min(920px, 100vw); }
+.ftree-edit { display: flex; flex-direction: column; gap: 4px; }
+.fe-row { display: grid; grid-template-columns: 20px minmax(140px, 1fr) minmax(140px, 1.1fr) 32px 32px; gap: 6px; align-items: center; padding-left: calc(var(--d) * 22px); }
+.fe-ico { font-size: 14px; }
+.field.small { height: 30px; font-size: 12.5px; padding: 0 8px; }
+.field.words { color: var(--ink-3); }
+.rename { display: flex; gap: 6px; align-items: center; flex: 1; }
+@media (max-width: 700px) { .fe-row { grid-template-columns: 18px 1fr 30px 30px; } .fe-row .words { grid-column: 2 / 3; } }
+.wide-drawer > .toolbar:last-child { position: sticky; bottom: -40px; background: var(--paper); padding: 12px 0 14px; border-top: 1px solid var(--hair); margin-top: auto; }

@@ -176,22 +176,22 @@ def assign(files, faces_by_id, people, overrides=None):
         text = f.get("text") or ""
         path = None
         if f["kind"] == "doc" or (f["kind"] == "photo" and len(text) > 30 and not fs):
-            path = folder_for_text(text, f["name"])
+            path = custom_folder(text, f["name"]) or map_path(folder_for_text(text, f["name"]))
         if path is None and looks_like_passport_photo(f, fs):
-            path = f"{D}/{LEG}/2. DNA"
+            path = map_path(f"{D}/{LEG}/2. DNA")
         ov = overrides.get(f["sha256"])
         if ov and ov.get("not_family"):
             continue  # you said: not a family paper
         if path is None and not ov:
             fam = sorted({x["person_id"] for x in fs if x["person_id"] in family})
             if fam and f["kind"] in ("photo", "video") and not f.get("screenshot"):
-                where = photo_folder(f, fs, f.get("labels") or [])
+                where = map_path(photo_folder(f, fs, f.get("labels") or []))
                 out[f["id"]] = {"person_id": fam[0], "also": fam[1:], "path": where, "folder_name": leaf(where), "by": "face", "extra": True}
             continue
         who, by = None, ""
         if ov:
             who, by = ov.get("person_id"), "you"
-            path = ov.get("folder") or path or MISC
+            path = map_path(ov.get("folder")) or path or map_path(MISC)
         else:
             low = f"{f['name']}\n{text}".lower()
             hits = {}
@@ -211,3 +211,83 @@ def assign(files, faces_by_id, people, overrides=None):
 
 def safe(name):
     return re.sub(r'[\\/:*?"<>|]+', "-", name).strip(" .") or "Unnamed"
+
+
+# ---------- your own folder tree (edited on the Details page, Family > Edit folders) ----------
+# work/vault_tree.json: {"tree": [folder paths], "map": {built-in path: your path, or null if removed},
+#                        "words": {your path: "words, that, put papers here"}}
+import json as _json, os as _os
+
+_CFG = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "work", "vault_tree.json")
+_cache = {"mtime": None, "cfg": {}}
+
+
+def config():
+    try:
+        m = _os.path.getmtime(_CFG)
+    except OSError:
+        return {}
+    if _cache["mtime"] != m:
+        _cache.update(mtime=m, cfg=_json.load(open(_CFG)))
+    return _cache["cfg"]
+
+
+def tree():
+    return config().get("tree") or TREE
+
+
+def map_path(path):
+    """A built-in folder path -> where it is in your tree (renamed, or its nearest kept parent, or Miscellaneous)."""
+    m = config().get("map") or {}
+    if not m or path is None:
+        return path
+    parts = path.split("/")
+    for i in range(len(parts), 0, -1):  # the longest renamed or removed part of the path wins
+        head = "/".join(parts[:i])
+        if head in m:
+            new = m[head]
+            if new is None:  # removed: use the nearest kept parent
+                for j in range(i - 1, 0, -1):
+                    up = "/".join(parts[:j])
+                    if m.get(up, up) is not None and (up in m or up in tree() or any(t.startswith(up + "/") for t in tree())):
+                        return m.get(up, up)
+                return m.get(MISC, MISC) or MISC
+            return "/".join([new] + parts[i:])
+    return path
+
+
+def custom_folder(text, name=""):
+    """Your own words for a folder come before the built-in rules (longest folder path first)."""
+    low = f"{name}\n{text}".lower()
+    for path, words in sorted((config().get("words") or {}).items(), key=lambda kv: -len(kv[0])):
+        for w in re.split(r"[,;\n]", words or ""):
+            w = w.strip().lower()
+            if w and re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", low):
+                return path
+    return None
+
+
+def save_config(new_tree, edits, words):
+    """new_tree: the folder paths now; edits: {path as it was shown: new path or None (removed)}."""
+    old = config()
+    base_map = dict(old.get("map") or {})
+    for leaf_ in TREE:  # every built-in folder, and every folder above it, not yet moved is at its own path
+        parts = leaf_.split("/")
+        for i in range(1, len(parts) + 1):
+            base_map.setdefault("/".join(parts[:i]), "/".join(parts[:i]))
+
+    def moved(cur):  # apply the edits, the longest matching folder first (renaming a parent moves its children)
+        for o in sorted(edits, key=len, reverse=True):
+            if cur == o or cur.startswith(o + "/"):
+                return None if edits[o] is None else edits[o] + cur[len(o):]
+        return cur
+    out = {}
+    for b, cur in base_map.items():
+        out[b] = None if cur is None else moved(cur)
+    clean = {k: v for k, v in out.items() if v != k}
+    cfg = {"tree": list(dict.fromkeys(p.strip("/") for p in new_tree if p.strip("/"))), "map": clean,
+           "words": {k: v for k, v in (words or {}).items() if v and k in new_tree}}
+    _os.makedirs(_os.path.dirname(_CFG), exist_ok=True)
+    with open(_CFG, "w") as f:
+        _json.dump(cfg, f, indent=1)
+    return cfg
